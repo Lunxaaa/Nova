@@ -17,12 +17,8 @@ export const config = {
   embedModel: process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small',
   preferredChannel: process.env.BOT_CHANNEL_ID || null,
   enableWebSearch: process.env.ENABLE_WEB_SEARCH !== 'false',
-  proxyScrapeEnabled: process.env.ENABLE_PROXY_SCRAPE !== 'false',
-  proxyScrapeEndpoint:
-    process.env.PROXYSCRAPE_ENDPOINT
-    || 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=getproxies&protocol=http&timeout=8000&country=all&ssl=yes&anonymity=elite&limit=200',
-  proxyScrapeRefreshMs: Number(process.env.PROXYSCRAPE_REFRESH_MS || 10 * 60 * 1000),
-  proxyScrapeMaxAttempts: Number(process.env.PROXYSCRAPE_ATTEMPTS || 5),
+  proxyPoolRefreshMs: Number(process.env.PROXY_POOL_REFRESH_MS || 10 * 60 * 1000),
+  proxyPoolMaxAttempts: Number(process.env.PROXY_POOL_ATTEMPTS || 5),
   coderUserId: process.env.CODER_USER_ID || null,
   maxCoderPingIntervalMs: 6 * 60 * 60 * 1000,
   shortTermLimit: 10,

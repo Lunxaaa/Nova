@@ -10,6 +10,10 @@ const filterFile = path.resolve('data', 'filter.txt');
 const cache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const FILTER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const FREE_PROXY_LIST_URL = 'https://free-proxy-list.net/en/';
+const PROXY_LINE_REGEX = /^\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}$/;
+const PROXY_REFRESH_MS = config.proxyPoolRefreshMs || 10 * 60 * 1000;
+const PROXY_MAX_ATTEMPTS = Math.max(1, config.proxyPoolMaxAttempts || 5);
 
 let cachedFilters = { terms: [], expires: 0 };
 let proxyPool = [];
@@ -68,6 +72,10 @@ async function loadBlockedTerms() {
   }
 }
 
+export async function detectFilteredPhrase(text) {
+  return findBlockedTerm(text);
+}
+
 async function findBlockedTerm(query) {
   if (!query) return null;
   const lowered = query.toLowerCase();
@@ -88,12 +96,17 @@ function createProxyUnavailableError(reason) {
   return error;
 }
 
-function parseProxyList(raw) {
-  if (!raw) return [];
-  return raw
-    .split(/\r?\n/)
+function normalizeProxyEntries(entries) {
+  if (!entries?.length) return [];
+  const seen = new Set();
+  entries
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
+    .forEach((line) => {
+      if (PROXY_LINE_REGEX.test(line) && !seen.has(line)) {
+        seen.add(line);
+      }
+    });
+  return Array.from(seen);
 }
 
 function removeProxyFromPool(proxy) {
@@ -105,35 +118,57 @@ function removeProxyFromPool(proxy) {
   }
 }
 
-async function hydrateProxyPool() {
-  if (!config.proxyScrapeEnabled) {
-    proxyPool = [];
-    proxyPoolExpires = 0;
-    proxyCursor = 0;
-    return;
-  }
-  const endpoint = config.proxyScrapeEndpoint;
-  const response = await fetch(endpoint, {
+async function fetchFreeProxyList() {
+  const response = await fetch(FREE_PROXY_LIST_URL, {
     headers: {
-      Accept: 'text/plain',
-      'User-Agent': 'NovaBot/1.0 (+https://github.com/) ProxyScrape client',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36',
+      Accept: 'text/html',
     },
   });
   if (!response.ok) {
-    throw createProxyUnavailableError(`Failed to fetch proxy list (HTTP ${response.status})`);
+    throw new Error(`Failed to fetch free-proxy-list.net feed (HTTP ${response.status})`);
   }
-  const text = await response.text();
-  const proxies = parseProxyList(text);
-  if (!proxies.length) {
-    throw createProxyUnavailableError('Proxy list came back empty');
+  const html = await response.text();
+  const $ = loadHtml(html);
+  const table = $('table.table.table-striped.table-bordered').first();
+  const entries = [];
+  table.find('tbody tr').each((_, row) => {
+    const cells = $(row).find('td');
+    if (!cells?.length) return undefined;
+    const ip = $(cells[0]).text().trim();
+    const port = $(cells[1]).text().trim();
+    const anonymity = $(cells[4]).text().trim().toLowerCase();
+    const https = $(cells[6]).text().trim().toLowerCase();
+    if (ip && port && https === 'yes' && !anonymity.includes('transparent')) {
+      entries.push(`${ip}:${port}`);
+    }
+    return undefined;
+  });
+  return normalizeProxyEntries(entries);
+}
+
+async function hydrateProxyPool() {
+  let lastError = null;
+
+  try {
+    const verifiedProxies = await fetchFreeProxyList();
+    if (!verifiedProxies.length) {
+      throw new Error('free-proxy-list.net returned zero usable entries');
+    }
+    proxyPool = verifiedProxies;
+    proxyPoolExpires = Date.now() + PROXY_REFRESH_MS;
+    proxyCursor = 0;
+    console.info(`[search] Loaded ${verifiedProxies.length} proxies from free-proxy-list.net`);
+    return;
+  } catch (error) {
+    lastError = error;
+    console.warn(`[search] Free proxy source failed: ${error.message}`);
   }
-  proxyPool = proxies;
-  proxyPoolExpires = Date.now() + (config.proxyScrapeRefreshMs || 10 * 60 * 1000);
-  proxyCursor = 0;
+
+  throw createProxyUnavailableError(lastError?.message || 'Proxy list unavailable');
 }
 
 async function ensureProxyPool() {
-  if (!config.proxyScrapeEnabled) return;
   if (proxyPool.length && Date.now() < proxyPoolExpires) {
     return;
   }
@@ -142,8 +177,8 @@ async function ensureProxyPool() {
 
 async function getProxyInfo() {
   await ensureProxyPool();
-  if (!config.proxyScrapeEnabled || !proxyPool.length) {
-    return null;
+  if (!proxyPool.length) {
+    throw createProxyUnavailableError('Proxy pool empty');
   }
   const proxy = proxyPool[proxyCursor % proxyPool.length];
   proxyCursor = (proxyCursor + 1) % proxyPool.length;
@@ -154,22 +189,15 @@ async function getProxyInfo() {
 }
 
 async function fetchDuckDuckGoHtml(url, headers) {
-  const maxAttempts = config.proxyScrapeEnabled
-    ? Math.max(1, config.proxyScrapeMaxAttempts || 5)
-    : 1;
+  const maxAttempts = PROXY_MAX_ATTEMPTS;
   let lastError = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     let proxyInfo = null;
     try {
       const options = { headers };
-      if (config.proxyScrapeEnabled) {
-        proxyInfo = await getProxyInfo();
-        if (!proxyInfo) {
-          throw createProxyUnavailableError('No proxies available');
-        }
-        options.dispatcher = proxyInfo.agent;
-      }
+      proxyInfo = await getProxyInfo();
+      options.dispatcher = proxyInfo.agent;
       const response = await fetch(url, options);
       if (!response.ok) {
         throw new Error(`DuckDuckGo request failed (${response.status})`);
@@ -181,19 +209,13 @@ async function fetchDuckDuckGoHtml(url, headers) {
       };
     } catch (error) {
       lastError = error;
-      if (!config.proxyScrapeEnabled) {
-        break;
-      }
       if (proxyInfo?.proxy) {
         removeProxyFromPool(proxyInfo.proxy);
       }
     }
   }
 
-  if (config.proxyScrapeEnabled) {
-    throw createProxyUnavailableError(lastError?.message || 'All proxies failed');
-  }
-  throw lastError || new Error('DuckDuckGo fetch failed');
+  throw createProxyUnavailableError(lastError?.message || 'All proxies failed');
 }
 
 export async function searchWeb(query, limit = 3) {
@@ -220,7 +242,7 @@ export async function searchWeb(query, limit = 3) {
   try {
     const { html: fetchedHtml, proxy } = await fetchDuckDuckGoHtml(`https://duckduckgo.com/html/?${params.toString()}`, headers);
     html = fetchedHtml;
-    proxyLabel = config.proxyScrapeEnabled ? proxy || 'proxy-unknown' : 'direct';
+    proxyLabel = proxy || 'proxy-unknown';
   } catch (error) {
     if (error?.code === 'SEARCH_PROXY_UNAVAILABLE') {
       throw error;
@@ -243,7 +265,7 @@ export async function searchWeb(query, limit = 3) {
   });
 
   setCache(query, results);
-  return { results, proxy: proxyLabel || (config.proxyScrapeEnabled ? 'proxy-unknown' : 'direct'), fromCache: false };
+  return { results, proxy: proxyLabel || 'proxy-unknown', fromCache: false };
 }
 
 export async function appendSearchLog({ userId, query, results, proxy }) {

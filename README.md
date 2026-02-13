@@ -93,6 +93,13 @@ README.md
 - Each ping goes through OpenAI with the prompt "you havent messaged your coder in a while, and you wanna chat with him!" so responses stay playful and unscripted.
 - The ping gets typed out (`sendTyping`) for realism and is stored back into the memory layers so the next incoming reply has context.
 
+## Update Log
+- **2026-02-13 — Dynamic personality + multi-message riffs:** Added the instinctive persona prompt with tone mirroring, `<SPLIT>`-based multi-bubble replies, and proactive coder pings so Nova feels alive in DMs.
+- **2026-02-13 — Memory intelligence:** Implemented embeddings-backed long-term memory, short-term buffers, transcript summarization, and heuristic importance pruning stored in `data/memory.json`.
+- **2026-02-13 — Live intel & directives:** Introduced DuckDuckGo scraping, per-turn dynamic prompt directives (tone, roleplay, instruction compliance), and env toggles (`ENABLE_WEB_SEARCH`, `CODER_USER_ID`).
+- **2026-02-13 — UX polish:** Added typing indicators, persona-aware fallback replies, mention cleaning, and README/docs covering setup, memory internals, web search, and deployment tips.
+- **2026-02-13 — Conversational control:** Tuned system prompt to avoid forced follow-up questions, raised temperature for looser banter, and reinforced Nova's awareness of DuckDuckGo lookups plus `<SPLIT>` usage.
+
 ## Notes
 - The bot retries OpenAI requests up to 3 times with incremental backoff when rate limited.
 - `data/memory.json` is ignored by git but will grow with usage; back it up if you want persistent personality.

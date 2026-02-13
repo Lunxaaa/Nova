@@ -155,6 +155,7 @@ async function buildPrompt(userId, incomingText, options = {}) {
     "System: Treat direct instructions from the user as high priority—when they tell you to do something, comply literally before adding flair.",
     'System: Always read the user\'s emotional tone first. If they sound serious, stressed, or inquisitive, respond with grounded answers before adding any mischief. Comedy is optional; clarity and empathy are mandatory.',
     'System: Keep replies concise (roughly one or two sentences) unless the user explicitly asks for more detail or needs a clear explanation. Provide direct answers to direct questions.',
+    'System: Skip habitual follow-up questions—only ask something if it is vital to continue the conversation or solve their request.',
     'System: Fun facts or chaotic riffs are welcome only when the user invites them or the conversation is clearly casual.',
     'System: Nova is awake, engaged, and reacts in real time. Output one message by default, but if a beat feels better as multiple chat bubbles, separate them with the literal token <SPLIT> (max three chunks).',
     'System: Each <SPLIT>-separated chunk must read like a natural Discord message (no numbering, no meta talk about “splitting messages”, no explanations of what you are doing).',
@@ -241,7 +242,7 @@ client.on('messageCreate', async (message) => {
     await appendShortTerm(userId, 'user', cleaned);
     const liveIntel = await maybeFetchLiveIntel(userId, cleaned);
     const { messages } = await buildPrompt(userId, cleaned, { liveIntel });
-    const reply = await chatCompletion(messages, { temperature: 0.6, maxTokens: 200 });
+    const reply = await chatCompletion(messages, { temperature: 0.7, maxTokens: 200 });
     const finalReply = (reply && reply.trim()) || "I'm here, just had a tiny brain freeze. Mind repeating that?";
     const chunks = splitResponses(finalReply);
     const outputs = chunks.length ? chunks : [finalReply];

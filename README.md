@@ -7,7 +7,7 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - OpenAI chat model (`gpt-4o-mini` by default) for dialogue and `text-embedding-3-small` for memory.
 - Short-term, long-term, and summarized memory layers with cosine-similarity retrieval.
 - Automatic memory pruning, importance scoring, and transcript summarization when chats grow long.
-- Local JSON vector store (no extra infrastructure) plus graceful retries for OpenAI rate limits.
+- Local SQLite memory file (no extra infrastructure) powered by `sql.js`, plus graceful retries for OpenAI rate limits.
 - Optional "miss u" pings that DM your coder at random intervals (0–6h) when `CODER_USER_ID` is set.
 - Dynamic per-message prompt directives that tune Nova's tone (empathetic, hype, roleplay, etc.) before every OpenAI call.
 - Lightweight Google scraping for fresh answers without paid APIs (locally cached).
@@ -15,7 +15,7 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - The same blacklist applies to everyday conversation—if a user message contains a banned term, Nova declines the topic outright.
 
 ## Prerequisites
-- Node.js 18+
+- Node.js 18+ (tested up through Node 25)
 - Discord bot token with **Message Content Intent** enabled
 - OpenAI API key
 
@@ -60,17 +60,20 @@ src/
 README.md
 ```
 
-## How Memory Works
-- **Short-term (recency buffer):** Last 10 conversation turns kept verbatim for style and continuity. Stored per user in `data/memory.json`.
-- **Long-term (vector store):** Every user message + bot reply pair becomes an embedding via `text-embedding-3-small`. Embeddings, raw text, timestamps, and heuristic importance scores are stored in the JSON vector store. Retrieval uses cosine similarity plus a small importance boost; top 5 results feed the prompt.
+- **Short-term (recency buffer):** Last 10 conversation turns kept verbatim for style and continuity. Stored per user inside `data/memory.sqlite`.
+- **Long-term (vector store):** Every user message + bot reply pair becomes an embedding via `text-embedding-3-small`. Embeddings, raw text, timestamps, and heuristic importance scores live in the same SQLite file. Retrieval uses cosine similarity plus a small importance boost; top 5 results feed the prompt.
 - **Summary layer:** When the recency buffer grows past ~3000 characters, Nova asks OpenAI to condense the transcript to <120 words, keeps the summary, and trims the raw buffer down to the last few turns. This keeps token usage low while retaining story arcs.
 - **Importance scoring:** Messages mentioning intent words ("plan", "remember", etc.), showing length, or emotional weight receive higher scores. When the store exceeds its cap, the lowest-importance/oldest memories are pruned. You can also call `pruneLowImportanceMemories()` manually if needed.
 
-## Memory Deep Dive
 - **Embedding math:** `text-embedding-3-small` returns 1,536 floating-point numbers for each text chunk. That giant array is a vector map of the message’s meaning; similar moments land near each other in 1,536-dimensional space.
-- **What gets embedded:** After every user→bot turn, `recordInteraction()` (see [src/memory.js](src/memory.js)) bundles the pair, scores its importance, asks OpenAI for an embedding, and stores `{ content, embedding, importance, timestamp }` inside `data/memory.json`.
+- **What gets embedded:** After every user→bot turn, `recordInteraction()` (see [src/memory.js](src/memory.js)) bundles the pair, scores its importance, asks OpenAI for an embedding, and stores `{ content, embedding, importance, timestamp }` inside the SQLite tables.
 - **Why so many numbers:** Cosine similarity needs raw vectors to compare new thoughts to past ones. When a fresh message arrives, `retrieveRelevantMemories()` embeds it too, calculates cosine similarity against every stored vector, adds a small importance boost, and returns the top five memories to inject into the system prompt.
-- **Self-cleaning:** If the JSON file grows past the configured limits, low-importance items are trimmed, summaries compress the short-term transcript, and you can delete `data/memory.json` to reset everything cleanly.
+- **Self-cleaning:** If the DB grows past the configured limits, low-importance items are trimmed, summaries compress the short-term transcript, and you can delete `data/memory.sqlite` to reset everything cleanly.
+
+### Migrating legacy `memory.json`
+- Keep your original `data/memory.json` in place and delete/rename `data/memory.sqlite` before launching the bot.
+- On the next start, the new SQL engine auto-imports every user record from the JSON file, logs a migration message, and writes the populated `.sqlite` file.
+- After confirming the data landed, archive or remove the JSON backup if you no longer need it.
 
 ## Conversation Flow
 1. Incoming message triggers only if it is a DM, mentions the bot, or appears in the configured channel.
@@ -97,9 +100,8 @@ README.md
 - Each ping goes through OpenAI with the prompt "you havent messaged your coder in a while, and you wanna chat with him!" so responses stay playful and unscripted.
 - The ping gets typed out (`sendTyping`) for realism and is stored back into the memory layers so the next incoming reply has context.
 
-## Notes
 - The bot retries OpenAI requests up to 3 times with incremental backoff when rate limited.
-- `data/memory.json` is ignored by git but will grow with usage; back it up if you want persistent personality.
-- To reset persona, delete `data/memory.json` while the bot is offline.
+- `data/memory.sqlite` is ignored by git but will grow with usage; back it up if you want persistent personality (and keep `data/memory.json` around only if you need legacy migrations).
+- To reset persona, delete `data/memory.sqlite` while the bot is offline.
 
 Happy chatting!

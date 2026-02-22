@@ -1,7 +1,11 @@
 import dotenv from 'dotenv';
+import path from 'path';
 import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const defaultMemoryDbFile = fileURLToPath(new URL('../data/memory.sqlite', import.meta.url));
+const legacyMemoryFile = fileURLToPath(new URL('../data/memory.json', import.meta.url));
 
 const requiredEnv = ['DISCORD_TOKEN', 'OPENAI_API_KEY'];
 requiredEnv.forEach((key) => {
@@ -20,7 +24,8 @@ export const config = {
   coderUserId: process.env.CODER_USER_ID || null,
   maxCoderPingIntervalMs: 6 * 60 * 60 * 1000,
   shortTermLimit: 10,
-  memoryFile: fileURLToPath(new URL('../data/memory.json', import.meta.url)),
+  memoryDbFile: process.env.MEMORY_DB_FILE ? path.resolve(process.env.MEMORY_DB_FILE) : defaultMemoryDbFile,
+  legacyMemoryFile,
   summaryTriggerChars: 3000,
   memoryPruneThreshold: 0.2,
   maxMemories: 200,

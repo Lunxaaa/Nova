@@ -1,5 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import initSqlJs from 'sql.js';
 import { config } from './config.js';
 import { createEmbedding, summarizeConversation } from './openai.js';
 
@@ -8,142 +10,351 @@ const ensureDir = async (filePath) => {
   await fs.mkdir(dir, { recursive: true });
 };
 
-const defaultStore = { users: {} };
+const shortTermToText = (entries) =>
+  entries.map((msg) => `${msg.role === 'user' ? 'User' : 'Bot'}: ${msg.content}`).join('\n');
 
-async function readStore() {
-  try {
-    const raw = await fs.readFile(config.memoryFile, 'utf-8');
-    return JSON.parse(raw);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      await ensureDir(config.memoryFile);
-      await fs.writeFile(config.memoryFile, JSON.stringify(defaultStore, null, 2));
-      return JSON.parse(JSON.stringify(defaultStore));
-    }
-    throw error;
-  }
-}
+const cosineSimilarity = (a, b) => {
+  if (!a?.length || !b?.length) return 0;
+  const dot = a.reduce((sum, value, idx) => sum + value * (b[idx] || 0), 0);
+  const magA = Math.hypot(...a);
+  const magB = Math.hypot(...b);
+  if (!magA || !magB) return 0;
+  return dot / (magA * magB);
+};
 
-async function writeStore(store) {
-  await ensureDir(config.memoryFile);
-  await fs.writeFile(config.memoryFile, JSON.stringify(store, null, 2));
-}
-
-function ensureUser(store, userId) {
-  if (!store.users[userId]) {
-    store.users[userId] = {
-      shortTerm: [],
-      longTerm: [],
-      summary: '',
-      lastUpdated: Date.now(),
-    };
-  }
-  return store.users[userId];
-}
-
-function shortTermToText(shortTerm) {
-  return shortTerm
-    .map((msg) => `${msg.role === 'user' ? 'User' : 'Bot'}: ${msg.content}`)
-    .join('\n');
-}
-
-function estimateImportance(text) {
-  const keywords = ['remember', 'promise', 'plan', 'goal', 'project', 'birthday'];
+const keywords = ['remember', 'promise', 'plan', 'goal', 'project', 'birthday'];
+const estimateImportance = (text) => {
   const keywordBoost = keywords.reduce((score, word) => (text.toLowerCase().includes(word) ? score + 0.2 : score), 0);
   const lengthScore = Math.min(text.length / 400, 0.5);
   const emojiBoost = /:[a-z_]+:|😊|😂|❤️/i.test(text) ? 0.1 : 0;
   return Math.min(1, 0.2 + keywordBoost + lengthScore + emojiBoost);
-}
+};
 
-async function pruneMemories(userMemory) {
-  if (userMemory.longTerm.length <= config.maxMemories) {
-    return;
+const parseEmbedding = (raw) => {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn('[memory] Failed to parse embedding payload:', error);
+    return [];
   }
-  userMemory.longTerm.sort((a, b) => a.importance - b.importance || a.timestamp - b.timestamp);
-  while (userMemory.longTerm.length > config.maxMemories) {
-    userMemory.longTerm.shift();
-  }
-}
+};
 
-async function maybeSummarize(userMemory) {
-  const charCount = userMemory.shortTerm.reduce((sum, msg) => sum + msg.content.length, 0);
-  if (charCount < config.summaryTriggerChars || userMemory.shortTerm.length < config.shortTermLimit) {
-    return;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const wasmDir = path.resolve(__dirname, '../node_modules/sql.js/dist');
+
+let initPromise = null;
+let writeQueue = Promise.resolve();
+
+const locateFile = (fileName) => path.join(wasmDir, fileName);
+
+const persistDb = async (db) => {
+  writeQueue = writeQueue.then(async () => {
+    const data = db.export();
+    await ensureDir(config.memoryDbFile);
+    await fs.writeFile(config.memoryDbFile, Buffer.from(data));
+  });
+  return writeQueue;
+};
+
+const run = (db, sql, params = []) => {
+  db.run(sql, params);
+};
+
+const get = (db, sql, params = []) => {
+  const stmt = db.prepare(sql);
+  try {
+    stmt.bind(params);
+    if (stmt.step()) {
+      return stmt.getAsObject();
+    }
+    return null;
+  } finally {
+    stmt.free();
   }
-  const transcript = shortTermToText(userMemory.shortTerm);
-  const updatedSummary = await summarizeConversation(userMemory.summary, transcript);
+};
+
+const all = (db, sql, params = []) => {
+  const stmt = db.prepare(sql);
+  const rows = [];
+  try {
+    stmt.bind(params);
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject());
+    }
+    return rows;
+  } finally {
+    stmt.free();
+  }
+};
+
+const createSchema = (db) => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      summary TEXT DEFAULT '',
+      last_updated INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS short_term (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS long_term (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      embedding TEXT NOT NULL,
+      importance REAL NOT NULL,
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+};
+
+const loadDatabase = async () => {
+  if (initPromise) {
+    return initPromise;
+  }
+  initPromise = (async () => {
+    await ensureDir(config.memoryDbFile);
+    const SQL = await initSqlJs({ locateFile });
+    let fileBuffer = null;
+    try {
+      fileBuffer = await fs.readFile(config.memoryDbFile);
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+    const db = fileBuffer ? new SQL.Database(new Uint8Array(fileBuffer)) : new SQL.Database();
+    createSchema(db);
+    const migrated = await migrateLegacyStore(db);
+    if (!fileBuffer || migrated) {
+      await persistDb(db);
+    }
+    return db;
+  })();
+  return initPromise;
+};
+
+const ensureUser = (db, userId) => {
+  run(db, "INSERT OR IGNORE INTO users (id, summary, last_updated) VALUES (?, '', 0)", [userId]);
+};
+
+const enforceShortTermCap = (db, userId) => {
+  const cap = config.shortTermLimit * 2;
+  const row = get(db, 'SELECT COUNT(1) as count FROM short_term WHERE user_id = ?', [userId]);
+  const total = row?.count || 0;
+  if (total > cap) {
+    run(
+      db,
+      `DELETE FROM short_term
+       WHERE id IN (
+         SELECT id FROM short_term
+         WHERE user_id = ?
+         ORDER BY timestamp ASC, id ASC
+         LIMIT ?
+       )`,
+      [userId, total - cap],
+    );
+    return true;
+  }
+  return false;
+};
+
+const pruneMemories = (db, userId) => {
+  const row = get(db, 'SELECT COUNT(1) as count FROM long_term WHERE user_id = ?', [userId]);
+  const total = row?.count || 0;
+  if (total > config.maxMemories) {
+    run(
+      db,
+      `DELETE FROM long_term
+       WHERE id IN (
+         SELECT id FROM long_term
+         WHERE user_id = ?
+         ORDER BY importance ASC, timestamp ASC
+         LIMIT ?
+       )`,
+      [userId, total - config.maxMemories],
+    );
+    return true;
+  }
+  return false;
+};
+
+const getShortTermHistory = (db, userId, limit) => {
+  const rows = all(
+    db,
+    'SELECT role, content, timestamp FROM short_term WHERE user_id = ? ORDER BY timestamp DESC, id DESC LIMIT ?',
+    [userId, limit],
+  );
+  return rows.reverse();
+};
+
+const fullShortTerm = (db, userId) =>
+  all(db, 'SELECT id, role, content, timestamp FROM short_term WHERE user_id = ? ORDER BY timestamp ASC, id ASC', [userId]);
+
+const maybeSummarize = async (db, userId) => {
+  const shortTermEntries = fullShortTerm(db, userId);
+  const charCount = shortTermEntries.reduce((sum, msg) => sum + (msg.content?.length || 0), 0);
+  if (charCount < config.summaryTriggerChars || shortTermEntries.length < config.shortTermLimit) {
+    return false;
+  }
+  const userRow = get(db, 'SELECT summary FROM users WHERE id = ?', [userId]) || { summary: '' };
+  const transcript = shortTermToText(shortTermEntries);
+  const updatedSummary = await summarizeConversation(userRow.summary || '', transcript);
   if (updatedSummary) {
-    userMemory.summary = updatedSummary;
-    userMemory.shortTerm = userMemory.shortTerm.slice(-4);
+    run(db, 'UPDATE users SET summary = ?, last_updated = ? WHERE id = ?', [updatedSummary, Date.now(), userId]);
+    const keep = 4;
+    const excess = shortTermEntries.length - keep;
+    if (excess > 0) {
+      run(
+        db,
+        `DELETE FROM short_term
+         WHERE id IN (
+           SELECT id FROM short_term
+           WHERE user_id = ?
+           ORDER BY timestamp ASC, id ASC
+           LIMIT ?
+         )`,
+        [userId, excess],
+      );
+    }
+    return true;
   }
-}
+  return false;
+};
 
-function cosineSimilarity(a, b) {
-  if (!a.length || !b.length) return 0;
-  const dot = a.reduce((sum, value, idx) => sum + value * (b[idx] || 0), 0);
-  const magA = Math.sqrt(a.reduce((sum, value) => sum + value * value, 0));
-  const magB = Math.sqrt(b.reduce((sum, value) => sum + value * value, 0));
-  if (!magA || !magB) return 0;
-  return dot / (magA * magB);
-}
+const migrateLegacyStore = async (db) => {
+  if (!config.legacyMemoryFile) return false;
+  const existing = get(db, 'SELECT 1 as present FROM users LIMIT 1');
+  if (existing) {
+    return false;
+  }
+  let raw;
+  try {
+    raw = await fs.readFile(config.legacyMemoryFile, 'utf-8');
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+  let store;
+  try {
+    store = JSON.parse(raw);
+  } catch (error) {
+    console.warn('[memory] Unable to parse legacy memory.json. Skipping migration.');
+    return false;
+  }
+  if (!store?.users || !Object.keys(store.users).length) {
+    return false;
+  }
+  Object.entries(store.users).forEach(([userId, user]) => {
+    ensureUser(db, userId);
+    run(db, 'UPDATE users SET summary = ?, last_updated = ? WHERE id = ?', [user.summary || '', user.lastUpdated || 0, userId]);
+    (user.shortTerm || []).forEach((entry) => {
+      run(db, 'INSERT INTO short_term (user_id, role, content, timestamp) VALUES (?, ?, ?, ?)', [
+        userId,
+        entry.role || 'user',
+        entry.content || '',
+        entry.timestamp || Date.now(),
+      ]);
+    });
+    (user.longTerm || []).forEach((entry) => {
+      const rowId = entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      run(db, 'INSERT INTO long_term (id, user_id, content, embedding, importance, timestamp) VALUES (?, ?, ?, ?, ?, ?)', [
+        rowId,
+        userId,
+        entry.content || '',
+        JSON.stringify(entry.embedding || []),
+        entry.importance ?? 0,
+        entry.timestamp || Date.now(),
+      ]);
+    });
+  });
+  console.log('[memory] Migrated legacy memory.json to SQLite (sql.js).');
+  return true;
+};
 
-async function retrieveRelevantMemories(userMemory, query) {
-  if (!userMemory.longTerm.length || !query?.trim()) {
+const retrieveRelevantMemories = async (db, userId, query) => {
+  if (!query?.trim()) {
+    return [];
+  }
+  const rows = all(db, 'SELECT id, content, embedding, importance, timestamp FROM long_term WHERE user_id = ?', [userId]);
+  if (!rows.length) {
     return [];
   }
   const queryEmbedding = await createEmbedding(query);
-  const scored = userMemory.longTerm
-    .map((entry) => ({
-      ...entry,
-      score: cosineSimilarity(queryEmbedding, entry.embedding) + entry.importance * 0.1,
-    }))
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, config.relevantMemoryCount);
-}
+  return rows
+    .map((entry) => {
+      const embedding = parseEmbedding(entry.embedding);
+      return {
+        ...entry,
+        embedding,
+        score: cosineSimilarity(queryEmbedding, embedding) + entry.importance * 0.1,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, config.relevantMemoryCount)
+    .map(({ score, ...rest }) => rest);
+};
 
 export async function appendShortTerm(userId, role, content) {
-  const store = await readStore();
-  const userMemory = ensureUser(store, userId);
-  userMemory.shortTerm.push({ role, content, timestamp: Date.now() });
-  if (userMemory.shortTerm.length > config.shortTermLimit * 2) {
-    userMemory.shortTerm = userMemory.shortTerm.slice(-config.shortTermLimit * 2);
-  }
-  await maybeSummarize(userMemory);
-  await writeStore(store);
+  const db = await loadDatabase();
+  ensureUser(db, userId);
+  run(db, 'INSERT INTO short_term (user_id, role, content, timestamp) VALUES (?, ?, ?, ?)', [
+    userId,
+    role,
+    content,
+    Date.now(),
+  ]);
+  enforceShortTermCap(db, userId);
+  await maybeSummarize(db, userId);
+  await persistDb(db);
 }
 
 export async function prepareContext(userId, incomingMessage) {
-  const store = await readStore();
-  const userMemory = ensureUser(store, userId);
-  const relevant = await retrieveRelevantMemories(userMemory, incomingMessage);
+  const db = await loadDatabase();
+  ensureUser(db, userId);
+  const userRow = get(db, 'SELECT summary FROM users WHERE id = ?', [userId]) || { summary: '' };
+  const shortTerm = getShortTermHistory(db, userId, config.shortTermLimit);
+  const memories = await retrieveRelevantMemories(db, userId, incomingMessage);
   return {
-    shortTerm: userMemory.shortTerm.slice(-config.shortTermLimit),
-    summary: userMemory.summary,
-    memories: relevant,
+    shortTerm,
+    summary: userRow.summary || '',
+    memories,
   };
 }
 
 export async function recordInteraction(userId, userMessage, botReply) {
-  const store = await readStore();
-  const userMemory = ensureUser(store, userId);
+  const db = await loadDatabase();
+  ensureUser(db, userId);
   const combined = `User: ${userMessage}\nBot: ${botReply}`;
   const embedding = await createEmbedding(combined);
   const importance = estimateImportance(combined);
-  userMemory.longTerm.push({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    content: combined,
-    embedding,
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  run(db, 'INSERT INTO long_term (id, user_id, content, embedding, importance, timestamp) VALUES (?, ?, ?, ?, ?, ?)', [
+    id,
+    userId,
+    combined,
+    JSON.stringify(embedding),
     importance,
-    timestamp: Date.now(),
-  });
-  await pruneMemories(userMemory);
-  userMemory.lastUpdated = Date.now();
-  await writeStore(store);
+    Date.now(),
+  ]);
+  pruneMemories(db, userId);
+  run(db, 'UPDATE users SET last_updated = ? WHERE id = ?', [Date.now(), userId]);
+  await persistDb(db);
 }
 
 export async function pruneLowImportanceMemories(userId) {
-  const store = await readStore();
-  const userMemory = ensureUser(store, userId);
-  userMemory.longTerm = userMemory.longTerm.filter((entry) => entry.importance >= config.memoryPruneThreshold);
-  await writeStore(store);
+  const db = await loadDatabase();
+  ensureUser(db, userId);
+  run(db, 'DELETE FROM long_term WHERE user_id = ? AND importance < ?', [userId, config.memoryPruneThreshold]);
+  await persistDb(db);
 }

@@ -409,6 +409,16 @@ client.on('messageCreate', async (message) => {
 
     await appendShortTerm(userId, 'user', cleaned);
 
+    try {
+      const state = continuationState.get(userId);
+      if (state) {
+        state.lastUserTs = Date.now();
+        continuationState.set(userId, state);
+      }
+    } catch (err) {
+      console.warn('[bot] Failed to reset continuation timer:', err);
+    }
+
     // If the user indicates they are leaving, stop proactive continuation
     if (stopCueRegex.test(cleaned)) {
       stopContinuationForUser(userId);

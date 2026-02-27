@@ -39,6 +39,6 @@ export const config = {
   // Proactive continuation settings: when a user stops replying, Nova can continue
   // the conversation every `continuationIntervalMs` milliseconds until the user
   // signals to stop or the `continuationMaxProactive` limit is reached.
-  continuationIntervalMs: process.env.CONTINUATION_INTERVAL_MS ? parseInt(process.env.CONTINUATION_INTERVAL_MS, 10) : 15000,
+  continuationIntervalMs: process.env.CONTINUATION_INTERVAL_MS ? parseInt(process.env.CONTINUATION_INTERVAL_MS, 10) : 10000,
   continuationMaxProactive: process.env.CONTINUATION_MAX_PROACTIVE ? parseInt(process.env.CONTINUATION_MAX_PROACTIVE, 10) : 10,
 };

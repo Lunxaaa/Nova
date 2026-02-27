@@ -24,10 +24,6 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
    ```bash
    npm install
     ```
-   ## Prerequisites
-   - Node.js 18+ (tested up through Node 25)
-   - Discord bot token with **Message Content Intent** enabled
-   - OpenRouter or OpenAI API key
 
    ## Setup
    1. Install dependencies:

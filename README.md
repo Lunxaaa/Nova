@@ -7,7 +7,7 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - Chat model (defaults to `meta-llama/llama-3-8b-instruct` when using OpenRouter) for dialogue and a low-cost embedding model (`nvidia/llama-nemotron-embed-vl-1b-v2` by default). OpenAI keys/models may be used as a fallback.
 - Short-term, long-term, and summarized memory layers with cosine-similarity retrieval.
 - **Rotating “daily mood” engine** that adjusts Nova’s personality each day (calm, goblin, philosopher, etc.). Mood influences emoji use, sarcasm, response length, and hype.
-- **Smarter live‑intel web search**: Nova now tries to detect when you’re discussing a specific topic (games, movies, proper‑nouns) and will automatically Google it to enrich context. It’s not triggered by every message, just enough to catch “outside” topics.
+- **LLM-powered live–intel web search**: Nova uses the LLM itself to decide whether a topic needs a live web search. If you mention something unfamiliar or that requires current info, it automatically Googles first and uses the results in its response—without triggering on casual chat.
 
 - Automatic memory pruning, importance scoring, and transcript summarization when chats grow long.
 - Local SQLite memory file (no extra infrastructure) powered by `sql.js`, plus graceful retries for the model API (OpenRouter/OpenAI).
@@ -101,7 +101,7 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 
    ## Local Web Search
    - `src/search.js` grabs the standard Google results page with a real browser user-agent, extracts the top titles/links/snippets, and caches them for 10 minutes to stay polite.
-   - `bot.js` detects when a question sounds “live” (mentions today/news/google/etc.) and injects the formatted snippets into the prompt as "Live intel". No paid APIs involved—it’s just outbound HTTPS from your machine.
+   - `bot.js` uses an LLM call to decide whether a message requires a live web search. It checks for obvious cues first (questions with `?`, "google" keywords), then asks the model "does this topic need current info?" Only searches if the model says yes. The formatted results are injected into the prompt as "Live intel"—no paid search APIs.
    - Toggle this via `ENABLE_WEB_SEARCH=false` if you don’t want Nova to look things up.
    - Edit `data/filter.txt` to maintain a newline-delimited list of banned keywords/phrases; matching queries are blocked before hitting Google *and* Nova refuses to discuss them in normal chat.
    - Every entry in `data/search.log` records which transport (direct or cache) served the lookup so you can audit traffic paths quickly.

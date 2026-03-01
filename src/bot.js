@@ -416,15 +416,6 @@ async function deliverReplies(message, chunks) {
   }
 }
 
-async function maybeReactOnMemory(message, memoryCount) {
-  if (!memoryCount) return;
-  try {
-    await message.react('🧠');
-  } catch (err) {
-    console.warn('[bot] memory reaction failed:', err?.message);
-  }
-}
-
 function buildBlackjackButtons(stage) {
   const finished = stage === 'stand' || stage === 'finished';
   const row = new ActionRowBuilder().addComponents(
@@ -715,7 +706,6 @@ client.on('messageCreate', async (message) => {
     await recordInteraction(userId, cleaned, outputs.join(' | '));
 
     await deliverReplies(message, outputs);
-    await maybeReactOnMemory(message, debug?.context?.memories?.length);
     startContinuationForUser(userId, message.channel);
   } catch (error) {
     console.error('[bot] Failed to respond:', error);

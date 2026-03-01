@@ -44,7 +44,6 @@ async function postJson(path, body) {
     const e = new Error(`Request timed out after ${timeout}ms`);
     e.code = 'UND_ERR_CONNECT_TIMEOUT';
     controller.abort();
-    // store on global so the catch sees it
     throw e;
   }, timeout);
 

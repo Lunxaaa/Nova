@@ -397,7 +397,6 @@ export async function findSimilar(userId, query) {
   return retrieveRelevantMemories(db, userId, query);
 }
 
-// Daily thought storage
 export async function getDailyThoughtFromDb(date) {
   const db = await loadDatabase();
   const row = get(db, 'SELECT thought FROM daily_thoughts WHERE date = ?', [date]);

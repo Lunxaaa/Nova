@@ -12,9 +12,6 @@ const dailyMoods = [
 let overrideMood = null;
 let currentDailyMood = null;
 
-/**
- * Get today's date as YYYY-MM-DD for comparison
- */
 function getTodayDate() {
   const d = new Date();
   return d.toISOString().split('T')[0];
@@ -50,7 +47,6 @@ async function setDailyThought(thought) {
 async function generateDailyThought() {
   const today = getTodayDate();
   
-  // Check if we already have a thought for today in the DB
   const existingThought = await getDailyThoughtFromDb(today);
   if (existingThought) {
     console.log('[mood] using existing thought for today:', existingThought);
@@ -67,8 +63,7 @@ async function generateDailyThought() {
     ];
     const resp = await chatCompletion(messages, { temperature: 0.8, maxTokens: 40 });
     newThought = (resp && resp.trim()) || '';
-    
-    // Truncate to 120 characters if it exceeds
+
     if (newThought.length > 120) {
       newThought = newThought.substring(0, 117) + '...';
     }
@@ -85,8 +80,7 @@ async function generateDailyThought() {
     ];
     newThought = fallbacks[Math.floor(Math.random() * fallbacks.length)];
   }
-  
-  // Save to database
+
   await saveDailyThought(today, newThought);
   console.log('[mood] generated and saved new thought for today:', newThought);
   return newThought;

@@ -28,7 +28,7 @@ export const config = {
   coderUserId: process.env.CODER_USER_ID || null,
   maxCoderPingIntervalMs: 6 * 60 * 60 * 1000,
   coderPingMinIntervalMs: process.env.CODER_PING_MIN_MS ? parseInt(process.env.CODER_PING_MIN_MS, 10) : 6 * 60 * 60 * 1000,
-  coderPingMaxIntervalMs: process.env.CODER_PING_MAX_MS ? parseInt(process.env.CODER_PING_MAX_MS, 10) : 8 * 60 * 60 * 1000,
+  coderPingMaxIntervalMs: process.env.CODER_PING_MAX_MS ? parseInt(process.env.CODER_PING_MAX_MS, 10) : 4.5 * 60 * 60 * 1000,
   shortTermLimit: 10,
   memoryDbFile: process.env.MEMORY_DB_FILE ? path.resolve(process.env.MEMORY_DB_FILE) : defaultMemoryDbFile,
   legacyMemoryFile,

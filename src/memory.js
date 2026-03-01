@@ -45,18 +45,44 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const wasmDir = path.resolve(__dirname, '../node_modules/sql.js/dist');
 
 let initPromise = null;
-let writeQueue = Promise.resolve();
+let persistTimer = null;
+let pendingSnapshot = null;
+let pendingPromise = null;
+let pendingResolve = null;
+let pendingReject = null;
 
 const locateFile = (fileName) => path.join(wasmDir, fileName);
 
-const persistDb = async (db) => {
-  writeQueue = writeQueue.then(async () => {
-    const data = db.export();
-    await ensureDir(config.memoryDbFile);
-    await fs.writeFile(config.memoryDbFile, Buffer.from(data));
-  });
-  return writeQueue;
+const scheduleWrite = (snapshot) => {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+  }
+  if (!pendingPromise) {
+    pendingPromise = new Promise((resolve, reject) => {
+      pendingResolve = resolve;
+      pendingReject = reject;
+    });
+  }
+  pendingSnapshot = snapshot;
+  persistTimer = setTimeout(async () => {
+    try {
+      await ensureDir(config.memoryDbFile);
+      await fs.writeFile(config.memoryDbFile, pendingSnapshot);
+      pendingResolve && pendingResolve();
+    } catch (err) {
+      pendingReject && pendingReject(err);
+    } finally {
+      pendingPromise = null;
+      pendingResolve = null;
+      pendingReject = null;
+      pendingSnapshot = null;
+      persistTimer = null;
+    }
+  }, 300);
+  return pendingPromise;
 };
+
+const persistDb = (db) => scheduleWrite(Buffer.from(db.export()));
 
 const run = (db, sql, params = []) => {
   db.run(sql, params);
@@ -291,7 +317,12 @@ const retrieveRelevantMemories = async (db, userId, query) => {
   if (!query?.trim()) {
     return [];
   }
-  const rows = all(db, 'SELECT id, content, embedding, importance, timestamp FROM long_term WHERE user_id = ?', [userId]);
+  const limit = config.longTermFetchLimit || 200;
+  const rows = all(
+    db,
+    'SELECT id, content, embedding, importance, timestamp FROM long_term WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?',
+    [userId, limit],
+  );
   if (!rows.length) {
     return [];
   }
@@ -386,10 +417,79 @@ export async function getLongTermMemories(userId) {
   );
 }
 
+export async function getLongTermMemoriesPage(userId, opts = {}) {
+  const { limit = 50, offset = 0 } = opts;
+  const db = await loadDatabase();
+  const rows = all(
+    db,
+    'SELECT id, content, importance, timestamp FROM long_term WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+    [userId, limit, offset],
+  );
+  const countRow = get(db, 'SELECT COUNT(1) as total FROM long_term WHERE user_id = ?', [userId]);
+  return { rows, total: countRow?.total || 0 };
+}
+
+export async function getMemoryTimeline(userId, days = 14) {
+  const db = await loadDatabase();
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  const rows = all(
+    db,
+    `
+      SELECT
+        strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch') as day,
+        COUNT(1) as count
+      FROM long_term
+      WHERE user_id = ?
+        AND timestamp >= ?
+      GROUP BY day
+      ORDER BY day DESC
+      LIMIT ?
+    `,
+    [userId, since, days],
+  );
+  const today = new Date();
+  const timeline = [];
+  const rowMap = new Map(rows.map((entry) => [entry.day, entry.count]));
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const key = d.toISOString().split('T')[0];
+    timeline.push({
+      day: key,
+      count: rowMap.get(key) || 0,
+    });
+  }
+  return timeline;
+}
+
 export async function deleteLongTerm(userId, entryId) {
   const db = await loadDatabase();
   run(db, 'DELETE FROM long_term WHERE user_id = ? AND id = ?', [userId, entryId]);
   await persistDb(db);
+}
+
+export async function upsertLongTerm(userId, entry) {
+  const db = await loadDatabase();
+  ensureUser(db, userId);
+  const now = Date.now();
+  const importance = typeof entry.importance === 'number' ? entry.importance : 0;
+  if (entry.id) {
+    run(
+      db,
+      'UPDATE long_term SET content = ?, importance = ?, timestamp = ? WHERE user_id = ? AND id = ?',
+      [entry.content, importance, now, userId, entry.id],
+    );
+    await persistDb(db);
+    return { id: entry.id, timestamp: now, updated: true };
+  }
+  const newId = `${now}-${Math.random().toString(36).slice(2, 8)}`;
+  run(
+    db,
+    'INSERT INTO long_term (id, user_id, content, embedding, importance, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+    [newId, userId, entry.content, JSON.stringify(entry.embedding || []), importance, now],
+  );
+  await persistDb(db);
+  return { id: newId, timestamp: now, created: true };
 }
 
 export async function findSimilar(userId, query) {

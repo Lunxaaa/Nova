@@ -29,13 +29,14 @@ export const config = {
   maxCoderPingIntervalMs: 6 * 60 * 60 * 1000,
   coderPingMinIntervalMs: process.env.CODER_PING_MIN_MS ? parseInt(process.env.CODER_PING_MIN_MS, 10) : 6 * 60 * 60 * 1000,
   coderPingMaxIntervalMs: process.env.CODER_PING_MAX_MS ? parseInt(process.env.CODER_PING_MAX_MS, 10) : 4.5 * 60 * 60 * 1000,
-  shortTermLimit: 10,
+  shortTermLimit: 6,
   memoryDbFile: process.env.MEMORY_DB_FILE ? path.resolve(process.env.MEMORY_DB_FILE) : defaultMemoryDbFile,
   legacyMemoryFile,
-  summaryTriggerChars: 3000,
+  summaryTriggerChars: 2200,
   memoryPruneThreshold: 0.2,
   maxMemories: 8000,
-  relevantMemoryCount: 5,
+  relevantMemoryCount: 3,
+  longTermFetchLimit: 120,
   // Optional local dashboard that runs alongside the bot. Enable with
   // `ENABLE_DASHBOARD=true` and customize port with `DASHBOARD_PORT`.
   dashboardEnabled: process.env.ENABLE_DASHBOARD === 'true',

@@ -2,6 +2,63 @@
 
 Nova is a friendly, slightly witty Discord companion that chats naturally in DMs or when mentioned in servers. It runs on Node.js, uses `discord.js` v14, and supports OpenRouter (recommended) or OpenAI backends for model access, plus lightweight local memory for persistent personality.
 
+## Recent changes (2026-03-01)
+- Added token-usage + performance optimizations (prompt builder + context caching + smaller injected payloads).
+- Upgraded the local memory dashboard: long-term memory create/edit, pagination (15 per page), search preview helper, and a recall timeline view.
+- Added Discord-side extras: `🧠` memory-injected reaction badge + a `/blackjack` embed mini-game with buttons.
+- Full session log lives in `CHANGELOG.md` (and is mirrored below).
+
+<details>
+<summary>Full update log (session)</summary>
+
+- Token + performance optimizations
+  - Added `src/prompt.js` to centralize prompt construction (`buildPrompt`) and reduce repeated prompt-building logic.
+  - Added a short-lived in-memory context cache in `src/bot.js` to reuse prepared context across the continuation loop and normal replies.
+  - Reduced default memory/prompt sizes in `src/config.js`:
+    - `shortTermLimit`: 10 -> 6
+    - `summaryTriggerChars`: 3000 -> 2200
+    - `relevantMemoryCount`: 5 -> 3
+    - Added `longTermFetchLimit` (default 120)
+  - Limited long-term memory retrieval to a recent window before similarity scoring in `src/memory.js` (uses `longTermFetchLimit`).
+  - Summarized live web-search intel before injecting it into the prompt (keeps the payload shorter) in `src/bot.js`.
+  - Debounced memory DB persistence in `src/memory.js` to batch multiple writes (instead of exporting/writing on every mutation).
+
+- Dashboard (local memory UI)
+  - Revamped the dashboard UI layout + styling in `src/public/index.html`.
+  - Added long-term memory create/edit support:
+    - API: `POST /api/users/:id/long` in `src/dashboard.js`
+    - Store: `upsertLongTerm()` in `src/memory.js`
+  - Added long-term memory pagination:
+    - API: `GET /api/users/:id/long?page=&per=` returns `{ rows, total, page, per, totalPages }` via `getLongTermMemoriesPage()` in `src/memory.js`
+    - UI: paging controls; long-term list shows 15 per page (`LONG_TERM_PER_PAGE = 15`)
+  - Added "search preview" UX in the dashboard to quickly reuse a similar memory result as an edit/create starting point ("Use this memory").
+  - Added a simple recall timeline:
+    - API: `GET /api/users/:id/timeline?days=` in `src/dashboard.js`
+    - Store: `getMemoryTimeline()` in `src/memory.js`
+    - UI: lightweight bar chart in `src/public/index.html`
+
+- Fixes
+  - Fixed dashboard long-term pagination wiring (`getLongTermMemoriesPage` import/usage) in `src/dashboard.js`.
+  - Fixed dashboard long-term "Edit" button behavior by wiring row handlers in `src/public/index.html`.
+  - Prevented button interactions from crashing the bot on late/invalid updates by deferring updates and editing the message in `src/bot.js`.
+
+- Discord-side features
+  - Added a memory-aware reaction badge: bot reacts with `🧠` when long-term memories were injected into the prompt (`src/bot.js`).
+  - Added a lightweight blackjack mini-game:
+    - Start via text trigger `/blackjack` (not a registered slash command).
+    - Single-embed game UI with button components for actions (Hit / Stand; Split is present as a placeholder).
+    - Improved interaction handling to avoid "Unknown interaction" crashes by deferring updates and editing the message (`src/bot.js`).
+
+- Reliability / guardrails
+  - Relaxed the "empty response" guard in `src/openai.js`:
+    - Still throws when the provider returns no choices.
+    - If choices exist but content is blank, returns an empty string instead of forcing fallback (reduces noisy false-positive failures).
+
+- Configuration / examples
+  - Updated `.env.example` to include `OPENAI_API_KEY`.
+
+</details>
+
 ## Features
 - Conversational replies in DMs automatically; replies in servers when mentioned or in a pinned channel.
 - Chat model (defaults to `meta-llama/llama-3-8b-instruct` when using OpenRouter) for dialogue and a low-cost embedding model (`nvidia/llama-nemotron-embed-vl-1b-v2` by default). OpenAI keys/models may be used as a fallback.
@@ -9,6 +66,9 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - **Rotating “daily mood” engine** that adjusts Nova’s personality each day (calm, goblin, philosopher, etc.). Mood influences emoji use, sarcasm, response length, and hype.  (Now randomized each run rather than fixed by calendar date.)
 - **LLM-powered live–intel web search**: Nova uses the LLM itself to decide whether a topic needs a live web search. If you mention something unfamiliar or that requires current info, it automatically Googles first and uses the results in its response—without triggering on casual chat.
 - **Optional local memory dashboard** (enabled with `ENABLE_DASHBOARD=true`): spin up a simple browser UI alongside the bot. Inspect stored memories by user, delete entries, run similarity queries, view importance scores, and peek at Nova’s current mood and quirky “status” of the day. The dashboard runs on `DASHBOARD_PORT` (3000 by default) and is entirely optional.
+- Local dashboard upgrades: long-term memory create/edit, pagination (15 per page), and a simple recall timeline.
+- `🧠` reaction badge when long-term memories are injected for a reply.
+- A simple `/blackjack` mini-game (embed + buttons).
 
 - Automatic memory pruning, importance scoring, and transcript summarization when chats grow long.
 - Local SQLite memory file (no extra infrastructure) powered by `sql.js`, plus graceful retries for the model API (OpenRouter/OpenAI).
@@ -65,10 +125,15 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
    src/
      bot.js        # Discord client + routing logic
      config.js     # Environment and tuning knobs
+     dashboard.js  # Local memory dashboard server (optional)
      openai.js     # Chat + embedding helpers with retry logic
      memory.js     # Multi-layer memory engine
+     prompt.js     # Prompt builder (system + dynamic directives)
+     public/
+       index.html  # Local dashboard UI
    .env.example
    README.md
+   CHANGELOG.md
    ```
 
    - **Short-term (recency buffer):** Last 10 conversation turns kept verbatim for style and continuity. Stored per user inside `data/memory.sqlite`.
@@ -108,7 +173,11 @@ The dashboard lets you:
 - Browse all users that the bot has spoken with.
 - Inspect short‑term and long‑term memory entries, including their importance scores and timestamps.
 - Delete individual long‑term memories if you want to clean up or correct something.
+- Edit or create long‑term memories from the dashboard.
+- Paginate long‑term memories (15 per page).
 - Run a similarity search to see which stored memories are most relevant to a query.
+- Use a similarity result as a quick prefill for editing/creating a memory.
+- View a simple recall timeline for the last couple weeks.
 - Peek at the current mood the bot is using and a quirky “status/thought” message generated each day.
 
 Once the bot is running, open your browser and go to `http://localhost:3000` (or your configured port).

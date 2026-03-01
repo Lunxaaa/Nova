@@ -176,16 +176,20 @@ export async function chatCompletion(messages, options = {}) {
       postJson('/chat/completions', payload)
     );
 
-    const text =
-      data?.choices?.[0]?.message?.content ||
-      data?.choices?.[0]?.text ||
-      '';
-
-    if (text && String(text).trim()) {
-      return String(text).trim();
+    const choice = data?.choices?.[0];
+    if (!choice) {
+      throw new Error('Empty response from primary model');
     }
-
-    throw new Error('Empty response from primary model');
+    const text =
+      choice?.message?.content ?? choice?.text ?? '';
+    if (typeof text === 'string') {
+      const trimmed = text.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+      return '';
+    }
+    return '';
   } catch (err) {
     console.warn(
       '[chatCompletion] primary model failed:',

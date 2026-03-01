@@ -1,172 +1,925 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Nova Memory Dashboard</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  body{
-    font-family:system-ui, sans-serif;
-    background:#121212;
-    color:#e0e0e0;
-    min-height:100vh;
-    padding:1rem;
-  }
-  .container{max-width:900px;margin:0 auto;}
-  h1{font-size:2rem;font-weight:700;color:#fff;margin-bottom:1rem;text-align:center;}
-  .mood-card,.section-card{background:#1e1e1e;border-radius:8px;padding:1.5rem;margin:1rem 0;box-shadow:0 4px 12px rgba(0,0,0,0.6);}
-  h2{font-size:1.5rem;color:#fff;border-bottom:2px solid #333;padding-bottom:0.5rem;margin-bottom:1rem;}
-  h3{font-size:1.2rem;color:#ddd;margin-top:1rem;margin-bottom:0.75rem;}
-  .user-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.75rem;}
-  .user-card{background:#292929;padding:1rem;border-radius:6px;cursor:pointer;transition:transform .2s,box-shadow .2s;color:#fff;}
-  .user-card:hover{transform:translateY(-3px);box-shadow:0 6px 20px rgba(0,0,0,0.7);}
-  .user-id{font-weight:600;font-size:1.1rem;margin-bottom:0.4rem;}
-  .user-summary{font-size:0.9rem;opacity:0.85;line-height:1.3;}
-  table{width:100%;border-collapse:collapse;margin-bottom:1rem;font-size:0.9rem;}
-  th{background:#333;color:#fff;padding:.75rem;text-align:left;}
-  td{padding:.75rem;border-bottom:1px solid #2a2a2a;}
-  tr:nth-child(even){background:#1e1e1e;}
-  .empty{color:#777;font-style:italic;text-align:center;padding:1rem;}
-  button{background:#444;color:#fff;border:none;padding:.5rem 1rem;border-radius:4px;cursor:pointer;transition:background .2s;}
-  button:hover{background:#555;}
-  .delete-btn{background:#880000;}
-  .delete-btn:hover{background:#aa0000;}
-  input[type=text]{width:100%;padding:.6rem;border:1px solid #333;border-radius:4px;background:#212121;color:#e0e0e0;}
-  .search-box{display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0;}
-  .search-results{background:#1e1e1e;border-left:4px solid #555;padding:1rem;border-radius:4px;margin-top:1rem;}
-  .search-results ul{list-style:none;}
-  .search-results li{padding:.6rem;margin-bottom:.4rem;background:#292929;border-radius:4px;}
-  .score-badge{display:inline-block;background:#555;color:#fff;padding:.2rem .4rem;border-radius:3px;font-size:.8rem;margin-right:.4rem;}
-  .modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;}
-  .modal{background:#1e1e1e;padding:2rem;border-radius:8px;max-height:90vh;overflow:auto;width:90%;max-width:800px;position:relative;}
-  .modal-close{position:absolute;top:0.5rem;right:0.75rem;font-size:1.5rem;color:#bbb;cursor:pointer;}
-  .loading{color:#999;text-align:center;font-weight:600;padding:1rem;}
-  .error{background:#550000;color:#fff;padding:1rem;border-radius:4px;}
-  @media(max-width:600px){.user-list{grid-template-columns:1fr;}}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nova Memory Dashboard</title>
+  <style>
+    :root {
+      font-family: 'Inter', system-ui, 'Segoe UI', sans-serif;
+      color: #eef3ff;
+      background-color: #080c10;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.45), transparent 35%),
+        linear-gradient(135deg, #04070d, #0f172a 45%, #111827 100%);
+      color: inherit;
+    }
+    .app-shell {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem clamp(1rem, 3vw, 2.75rem) 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5rem;
+      padding: 1.5rem;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.4);
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.75rem, 3vw, 2.25rem);
+      line-height: 1.1;
+    }
+    .hero p {
+      margin: 0.35rem 0 0;
+      color: rgba(239, 243, 255, 0.75);
+      max-width: 480px;
+    }
+    .eyebrow {
+      letter-spacing: 0.1em;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: #9fa8ff;
+    }
+    .mood-card {
+      min-width: 210px;
+      padding: 1rem 1.2rem;
+      border-radius: 0.95rem;
+      background: linear-gradient(135deg, rgba(96, 165, 250, 0.25), rgba(59, 130, 246, 0.3));
+      border: 1px solid rgba(96, 165, 250, 0.4);
+      font-weight: 600;
+      color: #eaf2ff;
+      text-align: center;
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(220px, 320px) 1fr;
+      gap: 1.25rem;
+    }
+    .panel {
+      background: rgba(15, 23, 42, 0.8);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      box-shadow: 0 15px 35px rgba(2, 6, 23, 0.6);
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      gap: 1rem;
+    }
+    .panel-header h2 {
+      margin: 0;
+      font-size: 1.3rem;
+    }
+    .pill {
+      display: inline-flex;
+      padding: 0.2rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .pill-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+    .panel-users .user-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-height: 65vh;
+      overflow-y: auto;
+    }
+    .user-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      background: rgba(255, 255, 255, 0.03);
+      color: inherit;
+      padding: 0.95rem 1rem;
+      border-radius: 0.75rem;
+      border: 1px solid transparent;
+      text-align: left;
+      cursor: pointer;
+      transition: border 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .user-card .user-id {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .user-card .user-summary {
+      font-size: 0.85rem;
+      color: rgba(238, 243, 255, 0.65);
+    }
+    .user-card:hover {
+      border-color: rgba(99, 102, 241, 0.5);
+      transform: translateY(-1px);
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.45);
+    }
+    .user-card.selected {
+      border-color: rgba(59, 130, 246, 0.8);
+      background: rgba(59, 130, 246, 0.15);
+    }
+    .panel-detail {
+      display: flex;
+      flex-direction: column;
+    }
+    .detail-header {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.75rem;
+    }
+    .detail-body {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .summary-card {
+      min-height: 80px;
+      padding: 1rem 1.2rem;
+      border-radius: 0.85rem;
+      border: 1px dashed rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.02);
+      color: rgba(238, 243, 255, 0.85);
+      font-size: 0.95rem;
+    }
+    .memory-section {
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 0.85rem;
+      padding: 1rem 1.2rem;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.01);
+    }
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(40px, 1fr));
+      gap: 0.3rem;
+      align-items: end;
+      min-height: 120px;
+      padding: 0.6rem;
+    }
+    .timeline-bar {
+      background: linear-gradient(180deg, rgba(59, 130, 246, 0.75), rgba(14, 165, 233, 0.4));
+      border-radius: 0.4rem;
+      position: relative;
+      transition: transform 0.2s ease;
+    }
+    .timeline-bar span {
+      position: absolute;
+      top: -1.4rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.6rem;
+      color: rgba(255, 255, 255, 0.85);
+      white-space: nowrap;
+    }
+    .pagination-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.45rem;
+      margin-bottom: 0.75rem;
+    }
+    .pagination-controls button {
+      border: none;
+      border-radius: 999px;
+      padding: 0.4rem 0.9rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.08);
+      color: inherit;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .pagination-controls button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    .pagination-controls span {
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 0.05em;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+    .section-content {
+      min-height: 80px;
+    }
+    .section-content table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .section-content th,
+    .section-content td {
+      text-align: left;
+      padding: 0.55rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .section-content th {
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+    }
+    .section-content tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .memory-form textarea,
+    .memory-form input {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 0.65rem;
+      padding: 0.65rem;
+      color: inherit;
+      font-family: inherit;
+      resize: vertical;
+    }
+    .memory-form label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 0.6rem;
+    }
+    .memory-form button {
+      border: none;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      padding: 0.65rem 1.2rem;
+      border-radius: 0.7rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .memory-form button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 35px rgba(15, 23, 42, 0.35);
+    }
+    .form-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .form-actions .ghost {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: none;
+    }
+    .memory-search {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .memory-search input {
+      flex: 1;
+    }
+    .memory-search button {
+      min-width: 160px;
+    }
+    .search-results {
+      min-height: 60px;
+      padding: 0.5rem;
+      border-radius: 0.6rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(15, 23, 42, 0.7);
+    }
+    .search-results ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .search-results li {
+      padding: 0.6rem;
+      border-radius: 0.55rem;
+      background: rgba(255, 255, 255, 0.03);
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .search-results .use-result {
+      border: none;
+      background: rgba(16, 185, 129, 0.12);
+      color: #a7f3d0;
+      border-radius: 0.5rem;
+      padding: 0.35rem 0.6rem;
+      align-self: flex-start;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .search-results .use-result:hover {
+      background: rgba(16, 185, 129, 0.25);
+    }
+    .score-badge {
+      display: inline-flex;
+      padding: 0.2rem 0.6rem;
+      border-radius: 0.45rem;
+      background: rgba(99, 102, 241, 0.2);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .memory-actions button {
+      border: none;
+      background: rgba(255, 255, 255, 0.08);
+      color: inherit;
+      padding: 0.4rem 0.7rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: background 0.2s ease;
+    }
+    .memory-actions button:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+    .memory-actions .delete {
+      background: rgba(248, 113, 113, 0.2);
+      border: 1px solid rgba(248, 113, 113, 0.4);
+    }
+    .memory-actions .use-result {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.2));
+      border: 1px solid rgba(16, 185, 129, 0.5);
+      color: #a7f3d0;
+    }
+    .loading {
+      color: rgba(226, 232, 240, 0.9);
+      font-weight: 500;
+      text-align: center;
+    }
+    .empty {
+      color: rgba(148, 163, 184, 0.9);
+      text-align: center;
+      padding: 0.6rem;
+    }
+    .error {
+      background: rgba(248, 113, 113, 0.15);
+      color: #fee2e2;
+      padding: 0.75rem;
+      border-radius: 0.6rem;
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      text-align: center;
+    }
+    @media (max-width: 1024px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+    @media (max-width: 600px) {
+      .panel {
+        padding: 1rem;
+      }
+      .memory-search {
+        flex-direction: column;
+      }
+      .memory-search button {
+        width: 100%;
+      }
+    }
+  </style>
 </head>
 <body>
-<div class="container">
-  <h1>🧠 Nova Memory Dashboard</h1>
-  <div id="mood"></div>
-  <div class="section-card">
-    <h2>Users</h2>
-    <div id="user-list" class="user-list">loading…</div>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Nova Memory Controller</p>
+        <h1>🧠 Memory dashboard</h1>
+        <p>Inspect short-term buffers, review long-term memories, and add or edit entries without leaving your browser.</p>
+      </div>
+      <div id="mood" class="mood-card">loading mood…</div>
+    </header>
+    <div class="dashboard-grid">
+      <section class="panel panel-users">
+        <div class="panel-header">
+          <h2>Users</h2>
+          <span id="user-count" class="pill">0</span>
+        </div>
+        <div id="user-list" class="user-list">loading…</div>
+      </section>
+      <section class="panel panel-detail">
+        <div class="panel-header detail-header">
+          <div>
+            <h2 id="detail-title">Select a user</h2>
+            <p id="detail-subtitle">Click any user card to load their memories.</p>
+          </div>
+          <span id="detail-badge" class="pill pill-secondary">idle</span>
+        </div>
+        <div class="detail-body">
+          <div id="summary" class="summary-card">No user selected yet.</div>
+          <div class="memory-section">
+            <div class="section-header">
+              <h3>Short-term</h3>
+            </div>
+            <div id="short-term-content" class="section-content">Waiting for user selection.</div>
+          </div>
+          <div class="memory-section">
+            <div class="section-header">
+              <h3>Long-term</h3>
+            </div>
+            <div class="pagination-controls">
+              <button id="long-term-prev" type="button">Prev</button>
+              <span id="long-term-page-label">Page 1 of 1</span>
+              <button id="long-term-next" type="button">Next</button>
+            </div>
+            <div id="long-term-content" class="section-content">Waiting for user selection.</div>
+          </div>
+          <div class="memory-section">
+            <div class="section-header">
+              <h3>Recall timeline</h3>
+            </div>
+            <div id="memory-timeline" class="timeline"></div>
+          </div>
+          <div class="memory-section">
+            <div class="section-header">
+              <h3 id="form-title">Add long-term memory</h3>
+              <span id="form-status" class="pill pill-secondary">idle</span>
+            </div>
+            <form id="long-term-form" class="memory-form">
+              <label>
+                <span>Content</span>
+                <textarea id="long-term-content-field" rows="3" placeholder="Describe the memory..."></textarea>
+              </label>
+              <label>
+                <span>Importance (0–1)</span>
+                <input id="long-term-importance" type="number" min="0" max="1" step="0.01" value="0.5" />
+              </label>
+              <div class="form-actions">
+                <button type="submit">Save memory</button>
+                <button type="button" id="form-cancel" class="ghost" style="display:none;">Cancel edit</button>
+              </div>
+            </form>
+          </div>
+          <div class="memory-section">
+            <div class="section-header">
+              <h3>Search long-term memories</h3>
+            </div>
+            <div class="memory-search">
+              <input id="search-q" type="text" placeholder="Similarity search query..." />
+              <button id="search-btn" type="button">Run search</button>
+            </div>
+            <div id="search-results" class="search-results">Search results will appear here.</div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
-</div>
-<div id="modal" class="modal-overlay">
-  <div class="modal">
-    <span class="modal-close" onclick="closeModal()">&times;</span>
-    <div id="detail"></div>
-  </div>
-</div>
-<script>
-async function fetchJson(path, opts){const res=await fetch(path,opts);if(!res.ok)throw new Error(res.statusText);return res.json();}
-function formatDate(ts){return new Date(ts).toLocaleString();}
-function closeModal(){document.getElementById('modal').style.display='none';}
-
-async function loadMood(){
-  try{
-    const data=await fetchJson('/api/mood');
-    const moodCard=document.createElement('div');
-    moodCard.className='mood-card';
-    moodCard.innerHTML='<strong>'+data.mood.name+'</strong><p>'+data.mood.description+'</p><p>'+data.thought+'</p>';
-    const old=document.getElementById('mood');
-    old.replaceWith(moodCard);
-    moodCard.id='mood';
-  }catch(e){console.error(e);}
-}
-
-async function loadUsers() {
-  console.log('client: fetching users');
-  try {
-    const users = await fetchJson('/api/users');
-    console.log('client: got users', users);
-    const container = document.getElementById('user-list');
-    if (!users.length) {
-      container.innerHTML = '<div class="empty">No users yet</div>';
-      return;
+  <script>
+    async function fetchJson(path, opts) {
+      const response = await fetch(path, opts);
+      if (!response.ok) throw new Error(response.statusText);
+      return response.json();
     }
-    container.innerHTML = users.map(u =>
-      '<div class="user-card" onclick="showUser(\'' + u.id + '\')">' +
-        '<div class="user-id">👤 ' + u.id + '</div>' +
-        '<div class="user-summary">' + (u.summary || 'No summary yet') + '</div>' +
-      '</div>'
-    ).join('');
-  } catch (e) {
-    console.error('client: loadUsers error', e);
-    document.getElementById('user-list').innerHTML = '<div class="error">Error loading users: ' + e.message + '</div>';
-  }
-}
 
-async function showUser(id){
-  console.log('client: showUser',id);
-  const detail=document.getElementById('detail');
-  detail.innerHTML='<div class="loading">Loading…</div>';
-  document.getElementById('modal').style.display='flex';
-  try{
-    const [shortR,longR]=await Promise.all([
-      fetchJson('/api/users/'+id+'/short'),
-      fetchJson('/api/users/'+id+'/long')
-    ]);
-    let html='<h2>Memory for '+id+'</h2>';
-    html+='<h3>Short-term</h3>';
-    if(shortR.length){
-      html+='<table><tr><th>Role</th><th>Content</th><th>When</th></tr>';
-      shortR.forEach(r=>{
-        html+='<tr><td><strong>'+r.role+'</strong></td><td>'+r.content.substring(0,100)+(r.content.length>100?'…':'')+'</td><td>'+formatDate(r.timestamp)+'</td></tr>';
+    function escapeHtml(value = '') {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatDate(ms) {
+      return new Date(ms).toLocaleString();
+    }
+
+    function updatePaginationControls() {
+      const safeTotalPages = Math.max(longTermTotalPages, 1);
+      pageLabel.textContent = `Page ${longTermPage} of ${safeTotalPages}`;
+      prevPageBtn.disabled = longTermPage <= 1 || safeTotalPages <= 1;
+      nextPageBtn.disabled = longTermPage >= safeTotalPages;
+    }
+
+    async function loadLongTermPage(userId) {
+      if (!userId) {
+        return { total: 0, totalPages: 1 };
+      }
+      detailBadge.textContent = 'loading…';
+      try {
+        const data = await fetchJson(`/api/users/${encodeURIComponent(userId)}/long?page=${longTermPage}&per=${LONG_TERM_PER_PAGE}`);
+        currentLongTerm = data.rows;
+        longTermTotal = data.total || 0;
+        longTermTotalPages = data.totalPages || 1;
+        detailBadge.textContent = longTermTotal ? `Page ${longTermPage} of ${longTermTotalPages}` : 'empty';
+        renderLongTerm(currentLongTerm);
+        updatePaginationControls();
+        return { total: longTermTotal, totalPages: longTermTotalPages };
+      } catch (err) {
+        detailBadge.textContent = 'error';
+        longTermEl.innerHTML = `<div class="error">Failed to load long-term memories: ${escapeHtml(err.message)}</div>`;
+        longTermTotal = 0;
+        longTermTotalPages = 1;
+        updatePaginationControls();
+        return { total: 0, totalPages: 1 };
+      }
+    }
+
+    const moodEl = document.getElementById('mood');
+    const userListEl = document.getElementById('user-list');
+    const userCountEl = document.getElementById('user-count');
+    const detailTitle = document.getElementById('detail-title');
+    const detailSubtitle = document.getElementById('detail-subtitle');
+    const detailBadge = document.getElementById('detail-badge');
+    const summaryEl = document.getElementById('summary');
+    const shortTermEl = document.getElementById('short-term-content');
+    const longTermEl = document.getElementById('long-term-content');
+    const timelineEl = document.getElementById('memory-timeline');
+    const searchInput = document.getElementById('search-q');
+    const searchBtn = document.getElementById('search-btn');
+    const searchResultsEl = document.getElementById('search-results');
+    const form = document.getElementById('long-term-form');
+    const formTitle = document.getElementById('form-title');
+    const formStatus = document.getElementById('form-status');
+    const formCancel = document.getElementById('form-cancel');
+    const contentField = document.getElementById('long-term-content-field');
+    const importanceField = document.getElementById('long-term-importance');
+    const prevPageBtn = document.getElementById('long-term-prev');
+    const nextPageBtn = document.getElementById('long-term-next');
+    const pageLabel = document.getElementById('long-term-page-label');
+
+    let usersById = new Map();
+    let selectedUser = null;
+    let editingEntryId = null;
+    let currentLongTerm = [];
+    let shortTermCount = 0;
+    const LONG_TERM_PER_PAGE = 15;
+    let longTermPage = 1;
+    let longTermTotalPages = 1;
+    let longTermTotal = 0;
+
+    async function loadMood() {
+      try {
+        const data = await fetchJson('/api/mood');
+        moodEl.innerHTML = `<strong>${data.mood.name}</strong><p>${data.mood.description}</p><p style="font-size:0.85rem;">${data.thought}</p>`;
+      } catch (err) {
+        moodEl.textContent = 'Mood unavailable';
+      }
+    }
+
+    async function loadUsers() {
+      try {
+        const users = await fetchJson('/api/users');
+        usersById = new Map(users.map((u) => [u.id, u]));
+        userCountEl.textContent = users.length;
+        if (!users.length) {
+          userListEl.innerHTML = '<div class="empty">No users yet.</div>';
+          return;
+        }
+        userListEl.innerHTML = '';
+        users.forEach((user) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'user-card';
+          button.dataset.user = user.id;
+          button.innerHTML = `
+            <span class="user-id">👤 ${user.id}</span>
+            <span class="user-summary">${user.summary || 'No summary yet'}</span>
+          `;
+          button.addEventListener('click', () => showUser(user.id));
+        userListEl.appendChild(button);
       });
-      html+='</table>';
-    }else html+='<p class="empty">none</p>';
-    html+='<h3>Long-term</h3>';
-    if(longR.length){
-      html+='<table><tr><th>Imp</th><th>Content</th><th>When</th><th></th></tr>';
-      longR.forEach(r=>{
-        const imp=r.importance? r.importance.toFixed(2):'N/A';
-        const impCol=r.importance? (r.importance>0.8?'#ff6b6b':r.importance>0.5?'#ffd43b':'#51cf66'):'#999';
-        html+='<tr><td><span class="score-badge" style="background:'+impCol+'">'+imp+'</span></td>'+
-             '<td>'+r.content.substring(0,100).replace(/</g,'&lt;')+(r.content.length>100?'…':'')+'</td>'+
-             '<td>'+formatDate(r.timestamp)+'</td>'+
-             '<td><button class="delete-btn" onclick="deleteEntry(\''+id+'\',\''+r.id+'\')">Del</button></td></tr>';
+        if (!selectedUser && users.length) {
+          showUser(users[0].id);
+        }
+      } catch (err) {
+        userListEl.innerHTML = `<div class="error">Failed to load users: ${err.message}</div>`;
+      }
+    }
+
+    function highlightSelectedCard(userId) {
+      document.querySelectorAll('.user-card').forEach((card) => {
+        card.classList.toggle('selected', card.dataset.user === userId);
       });
-      html+='</table>';
-    }else html+='<p class="empty">none</p>';
-    html+='<h3>Search</h3><div class="search-box"><input id="search-q" type="text" placeholder="query…"/><button onclick="runSearch(\''+id+'\')">Search</button></div><div id="search-results"></div>';
-    detail.innerHTML=html;
-  }catch(e){
-    detail.innerHTML='<div class="error">error: '+e.message+'</div>';
-  }
-}
+    }
 
-async function deleteEntry(user, id) {
-  console.log('client: deleteEntry', user, id);
-  if (!confirm('Are you sure you want to delete this memory?')) return;
-  try {
-    await fetch('/api/users/' + user + '/long/' + id, { method: 'DELETE' });
-    showUser(user);
-  } catch (e) {
-    alert('Error deleting memory: ' + e.message);
-  }
-}
+    async function showUser(userId, resetPage = true) {
+      const previousUser = selectedUser;
+      selectedUser = userId;
+      if (resetPage || previousUser !== userId) {
+        longTermPage = 1;
+      }
+      highlightSelectedCard(userId);
+      detailTitle.textContent = `Memory for ${userId}`;
+      detailSubtitle.textContent = 'Loading short-term and long-term caches…';
+      detailBadge.textContent = 'loading…';
+      summaryEl.innerHTML = '<div class="loading">Loading summary…</div>';
+      shortTermEl.innerHTML = '<div class="loading">Loading short-term history…</div>';
+      longTermEl.innerHTML = '<div class="loading">Loading long-term memories…</div>';
+      searchResultsEl.innerHTML = '<div class="loading">Results will appear here.</div>';
+      resetForm();
 
-async function runSearch(user){
-  const q=document.getElementById('search-q').value;
-  if(!q){return;}
-  const container=document.getElementById('search-results');
-  container.innerHTML='<div class="loading">Searching…</div>';
-  try{
-    const res=await fetchJson('/api/users/'+user+'/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
-    if(!res.length){container.innerHTML='<div class="search-results"><p class="empty">none</p></div>';return;}
-    let html='<div class="search-results"><ul>';
-    res.forEach(r=>{const score=r.score?r.score.toFixed(3):'?';html+='<li><span class="score-badge">'+score+'</span>'+r.content.substring(0,100).replace(/</g,'&lt;')+(r.content.length>100?'…':'')+'</li>';});
-    html+='</ul></div>';
-    container.innerHTML=html;
-  }catch(e){container.innerHTML='<div class="error">search error</div>';}
-}
+      try {
+      const shortTermPromise = fetchJson(`/api/users/${encodeURIComponent(userId)}/short`);
+      const longTermPromise = loadLongTermPage(userId);
+      const timelinePromise = loadTimeline(userId);
+      const shortTerm = await shortTermPromise;
+      shortTermCount = shortTerm.length;
+      renderShortTerm(shortTerm);
+      const longTermInfo = await longTermPromise;
+      detailSubtitle.textContent = `Short-term: ${shortTerm.length} entries · Long-term: ${longTermInfo.total || 0} entries`;
+      detailBadge.textContent = longTermTotal ? `Page ${longTermPage} of ${longTermTotalPages}` : 'empty';
+      summaryEl.textContent = usersById.get(userId)?.summary || 'No summary yet.';
+      searchResultsEl.innerHTML = '<div class="empty">Run a search to inspect stored memories.</div>';
+      await timelinePromise;
+    } catch (err) {
+        shortTermEl.innerHTML = `<div class="error">Failed to load short-term memory: ${escapeHtml(err.message)}</div>`;
+        longTermEl.innerHTML = `<div class="error">Failed to load long-term memory: ${escapeHtml(err.message)}</div>`;
+        detailSubtitle.textContent = 'Error loading memories';
+        detailBadge.textContent = 'error';
+      }
+    }
 
-loadMood();
-loadUsers();
-</script>
+    function renderShortTerm(entries) {
+      if (!entries.length) {
+        shortTermEl.innerHTML = '<div class="empty">No recent short-term entries.</div>';
+        return;
+      }
+      const table = document.createElement('table');
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Content</th>
+            <th>When</th>
+          </tr>
+        </thead>
+      `;
+      const body = document.createElement('tbody');
+      entries.slice(-8).reverse().forEach((entry) => {
+        const row = document.createElement('tr');
+        const safeContent = escapeHtml(entry.content);
+        const preview = safeContent.length > 120 ? `${safeContent.slice(0, 120)}…` : safeContent;
+        row.innerHTML = `
+          <td><strong>${entry.role}</strong></td>
+          <td>${preview}</td>
+          <td>${formatDate(entry.timestamp)}</td>
+        `;
+        body.appendChild(row);
+      });
+      table.appendChild(body);
+      shortTermEl.innerHTML = '';
+      shortTermEl.appendChild(table);
+    }
+
+    function renderLongTerm(entries) {
+      if (!entries.length) {
+        longTermEl.innerHTML = '<div class="empty">No long-term memories stored yet.</div>';
+        return;
+      }
+      const table = document.createElement('table');
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Imp.</th>
+            <th>Content</th>
+            <th>When</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+      `;
+      const body = document.createElement('tbody');
+      entries.forEach((entry) => {
+        const imp = entry.importance ? entry.importance.toFixed(2) : 'N/A';
+        const row = document.createElement('tr');
+        const safeContent = escapeHtml(entry.content);
+        const preview = safeContent.length > 120 ? `${safeContent.slice(0, 120)}…` : safeContent;
+        row.innerHTML = `
+          <td><span class="score-badge">${imp}</span></td>
+          <td>${preview}</td>
+          <td>${formatDate(entry.timestamp)}</td>
+          <td class="memory-actions">
+            <button type="button" data-action="edit" data-id="${entry.id}">Edit</button>
+            <button type="button" class="delete" data-action="delete" data-id="${entry.id}">Delete</button>
+          </td>
+        `;
+        body.appendChild(row);
+        const editButton = row.querySelector('button[data-action="edit"]');
+        if (editButton) {
+          editButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            startEdit(entry.id);
+          });
+        }
+        const deleteButton = row.querySelector('button[data-action="delete"]');
+        if (deleteButton) {
+          deleteButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            deleteEntry(entry.id);
+          });
+        }
+      });
+      table.appendChild(body);
+      longTermEl.innerHTML = '';
+      longTermEl.appendChild(table);
+    }
+
+    async function loadTimeline(userId) {
+      if (!timelineEl) return;
+      try {
+        const { entries } = await fetchJson(`/api/users/${encodeURIComponent(userId)}/timeline`);
+        renderTimeline(entries || []);
+      } catch (err) {
+        timelineEl.innerHTML = `<div class="error">Timeline unavailable: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderTimeline(entries) {
+      if (!timelineEl) return;
+      if (!entries || !entries.length) {
+        timelineEl.innerHTML = '<div class="empty">No recall data yet.</div>';
+        return;
+      }
+      const maxCount = Math.max(...entries.map((entry) => entry.count), 1);
+      timelineEl.innerHTML = '';
+      entries.forEach((entry) => {
+        const bar = document.createElement('div');
+        const height = (entry.count / maxCount) * 100;
+        bar.className = 'timeline-bar';
+        bar.style.height = `${Math.max(height, 6)}%`;
+        bar.innerHTML = `<span>${entry.count}</span>`;
+        bar.title = `${entry.day}: ${entry.count} hit${entry.count === 1 ? '' : 's'}`;
+        timelineEl.appendChild(bar);
+      });
+    }
+
+    function useSearchResult(content, importance = 0) {
+      editingEntryId = null;
+      contentField.value = content;
+      importanceField.value = Number.isFinite(importance) ? importance.toFixed(2) : '0.5';
+      formTitle.textContent = 'Add long-term memory';
+      formStatus.textContent = 'ready';
+      formCancel.style.display = 'none';
+      contentField.focus();
+    }
+
+    function startEdit(entryId) {
+      const entry = currentLongTerm.find((item) => item.id === entryId);
+      if (!entry) return;
+      selectedUser = selectedUser; // ensure defined
+      editingEntryId = entryId;
+      contentField.value = entry.content;
+      importanceField.value = entry.importance?.toFixed(2) || '0.5';
+      formTitle.textContent = 'Edit long-term memory';
+      formStatus.textContent = 'editing';
+      formCancel.style.display = 'inline-flex';
+    }
+
+    function resetForm() {
+      editingEntryId = null;
+      contentField.value = '';
+      importanceField.value = '0.5';
+      formTitle.textContent = 'Add long-term memory';
+      formStatus.textContent = 'idle';
+      formCancel.style.display = 'none';
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!selectedUser) return;
+      const content = contentField.value.trim();
+      if (!content) {
+        alert('Please enter some content for the memory.');
+        return;
+      }
+      const importance = parseFloat(importanceField.value);
+      formStatus.textContent = 'saving…';
+      try {
+        await fetchJson(`/api/users/${selectedUser}/long`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: editingEntryId,
+            content,
+            importance: Number.isFinite(importance) ? importance : 0,
+          }),
+        });
+        formStatus.textContent = 'saved';
+        resetForm();
+        showUser(selectedUser);
+      } catch (err) {
+        formStatus.textContent = 'error';
+        alert('Failed to save memory: ' + err.message);
+      }
+    });
+
+    formCancel.addEventListener('click', () => {
+      resetForm();
+    });
+
+    async function deleteEntry(entryId) {
+      if (!selectedUser) return;
+      if (!confirm('Delete this memory permanently?')) return;
+      try {
+        const response = await fetch(`/api/users/${selectedUser}/long/${entryId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(response.statusText || 'delete failed');
+        showUser(selectedUser);
+      } catch (err) {
+        alert('Failed to delete memory: ' + err.message);
+      }
+    }
+
+    async function runSearch() {
+      if (!selectedUser) {
+        searchResultsEl.innerHTML = '<div class="error">Select a user first.</div>';
+        return;
+      }
+      const query = searchInput.value.trim();
+      if (!query) {
+        searchResultsEl.innerHTML = '<div class="empty">Type a query to search embeddings.</div>';
+        return;
+      }
+      searchResultsEl.innerHTML = '<div class="loading">Searching…</div>';
+      try {
+        const results = await fetchJson(`/api/users/${selectedUser}/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+        if (!results.length) {
+          searchResultsEl.innerHTML = '<div class="empty">No matching memories found.</div>';
+          return;
+        }
+        const list = document.createElement('ul');
+        results.forEach((entry) => {
+          const item = document.createElement('li');
+          const score = entry.score ? entry.score.toFixed(3) : 'n/a';
+          const safeContent = escapeHtml(entry.content || '');
+          const preview = safeContent.length > 150 ? `${safeContent.slice(0, 150)}…` : safeContent;
+          item.innerHTML = `
+            <span class="score-badge">${score}</span>
+            <span>${preview}</span>
+          `;
+          const useButton = document.createElement('button');
+          useButton.type = 'button';
+          useButton.className = 'memory-actions use-result';
+          useButton.textContent = 'Use this memory';
+          useButton.addEventListener('click', () => useSearchResult(entry.content || '', entry.importance));
+          item.appendChild(useButton);
+          list.appendChild(item);
+        });
+        searchResultsEl.innerHTML = '';
+        searchResultsEl.appendChild(list);
+      } catch (err) {
+        searchResultsEl.innerHTML = `<div class="error">Search error: ${err.message}</div>`;
+      }
+    }
+
+    searchBtn.addEventListener('click', runSearch);
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        runSearch();
+      }
+    });
+    prevPageBtn.addEventListener('click', async () => {
+      if (!selectedUser || longTermPage <= 1) return;
+      longTermPage -= 1;
+      const info = await loadLongTermPage(selectedUser);
+      detailSubtitle.textContent = `Short-term: ${shortTermCount} entries · Long-term: ${info.total || 0} entries`;
+      searchResultsEl.innerHTML = '<div class="empty">Run a search to inspect stored memories.</div>';
+    });
+    nextPageBtn.addEventListener('click', async () => {
+      if (!selectedUser || longTermPage >= longTermTotalPages) return;
+      longTermPage += 1;
+      const info = await loadLongTermPage(selectedUser);
+      detailSubtitle.textContent = `Short-term: ${shortTermCount} entries · Long-term: ${info.total || 0} entries`;
+      searchResultsEl.innerHTML = '<div class="empty">Run a search to inspect stored memories.</div>';
+    });
+
+    loadMood();
+    loadUsers();
+  </script>
 </body>
 </html>

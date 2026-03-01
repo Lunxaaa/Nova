@@ -5,9 +5,11 @@ import { config } from './config.js';
 import {
   listUsers,
   getAllShortTerm,
-  getLongTermMemories,
+  getLongTermMemoriesPage,
+  getMemoryTimeline,
   deleteLongTerm,
   findSimilar,
+  upsertLongTerm,
 } from './memory.js';
 import { getDailyMood, getDailyThought, setDailyThought } from './mood.js';
 
@@ -58,10 +60,29 @@ export function startDashboard() {
   app.get('/api/users/:id/long', async (req, res) => {
     console.log('[dashboard] GET /api/users/' + req.params.id + '/long');
     try {
-      const rows = await getLongTermMemories(req.params.id);
-      res.json(rows);
+      const perRaw = parseInt(req.query.per, 10);
+      const pageRaw = parseInt(req.query.page, 10);
+      const per = Number.isFinite(perRaw) ? Math.min(Math.max(perRaw, 1), 200) : 50;
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+      const offset = (page - 1) * per;
+      const { rows, total } = await getLongTermMemoriesPage(req.params.id, { limit: per, offset });
+      const totalPages = Math.max(1, Math.ceil(total / per));
+      res.json({ rows, total, page, per, totalPages });
     } catch (err) {
       console.error('[dashboard] fetch long-term failed', err);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  app.get('/api/users/:id/timeline', async (req, res) => {
+    console.log('[dashboard] GET /api/users/' + req.params.id + '/timeline');
+    try {
+      const daysRaw = parseInt(req.query.days, 10);
+      const days = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(daysRaw, 30) : 14;
+      const entries = await getMemoryTimeline(req.params.id, days);
+      res.json({ entries });
+    } catch (err) {
+      console.error('[dashboard] fetch timeline failed', err);
       res.status(500).json({ error: 'internal' });
     }
   });
@@ -73,6 +94,27 @@ export function startDashboard() {
       res.json({ ok: true });
     } catch (err) {
       console.error('[dashboard] delete memory failed', err);
+      res.status(500).json({ error: 'internal' });
+    }
+  });
+
+  app.post('/api/users/:id/long', async (req, res) => {
+    console.log('[dashboard] POST /api/users/' + req.params.id + '/long', req.body);
+    try {
+      const { content, importance, id } = req.body;
+      if (!content || typeof content !== 'string' || !content.trim()) {
+        return res.status(400).json({ error: 'content required' });
+      }
+      const parsedImportance = typeof importance === 'number' ? importance : parseFloat(importance);
+      const normalizedImportance = Number.isFinite(parsedImportance) ? Math.max(0, Math.min(1, parsedImportance)) : 0;
+      const result = await upsertLongTerm(req.params.id, {
+        id,
+        content: content.trim(),
+        importance: normalizedImportance,
+      });
+      res.json({ ok: true, entry: result });
+    } catch (err) {
+      console.error('[dashboard] upsert memory failed', err);
       res.status(500).json({ error: 'internal' });
     }
   });

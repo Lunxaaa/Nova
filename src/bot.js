@@ -1,12 +1,13 @@
 import dotenv from "dotenv";
 dotenv.config({ path: "../.env" });
-import { Client, GatewayIntentBits, Partials, ChannelType, ActivityType } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, ChannelType, ActivityType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from './config.js';
 import { chatCompletion } from './openai.js';
-import { appendShortTerm, prepareContext, recordInteraction } from './memory.js';
+import { appendShortTerm, recordInteraction } from './memory.js';
 import { searchWeb, appendSearchLog, detectFilteredPhrase } from './search.js';
 import { getDailyMood, setMoodByName, getDailyThought, generateDailyThought } from './mood.js';
 import { startDashboard } from './dashboard.js';
+import { buildPrompt, searchCueRegex } from './prompt.js';
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -20,6 +21,130 @@ const client = new Client({
 let coderPingTimer;
 const continuationState = new Map();
 let isSleeping = false;
+
+const contextCache = new Map();
+const CONTEXT_CACHE_TTL_MS = 2 * 60 * 1000;
+
+const cloneShortTerm = (entries = []) => entries.map((entry) => ({ ...entry }));
+const cloneMemories = (entries = []) => entries.map((entry) => ({ ...entry }));
+
+function cacheContext(userId, context) {
+  if (!context) {
+    contextCache.delete(userId);
+    return null;
+  }
+  const snapshot = {
+    shortTerm: cloneShortTerm(context.shortTerm || []),
+    summary: context.summary,
+    memories: cloneMemories(context.memories || []),
+  };
+  contextCache.set(userId, { context: snapshot, timestamp: Date.now() });
+  return snapshot;
+}
+
+function getCachedContext(userId) {
+  const entry = contextCache.get(userId);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CONTEXT_CACHE_TTL_MS) {
+    contextCache.delete(userId);
+    return null;
+  }
+  return entry.context;
+}
+
+function appendToCachedShortTerm(userId, role, content) {
+  const entry = contextCache.get(userId);
+  if (!entry) return;
+  const limit = config.shortTermLimit || 6;
+  const shortTerm = entry.context.shortTerm || [];
+  shortTerm.push({ role, content });
+  if (shortTerm.length > limit) {
+    shortTerm.splice(0, shortTerm.length - limit);
+  }
+  entry.context.shortTerm = shortTerm;
+  entry.timestamp = Date.now();
+}
+
+async function appendShortTermWithCache(userId, role, content) {
+  await appendShortTerm(userId, role, content);
+  appendToCachedShortTerm(userId, role, content);
+}
+
+const blackjackState = new Map();
+const suits = ['♠', '♥', '♦', '♣'];
+const ranks = [
+  { rank: 'A', value: 1 },
+  { rank: '2', value: 2 },
+  { rank: '3', value: 3 },
+  { rank: '4', value: 4 },
+  { rank: '5', value: 5 },
+  { rank: '6', value: 6 },
+  { rank: '7', value: 7 },
+  { rank: '8', value: 8 },
+  { rank: '9', value: 9 },
+  { rank: '10', value: 10 },
+  { rank: 'J', value: 10 },
+  { rank: 'Q', value: 10 },
+  { rank: 'K', value: 10 },
+];
+
+const createDeck = () => {
+  const deck = [];
+  for (const suit of suits) {
+    for (const rank of ranks) {
+      deck.push({
+        rank: rank.rank,
+        value: rank.value,
+        label: `${rank.rank}${suit}`,
+      });
+    }
+  }
+  for (let i = deck.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+};
+
+const drawCard = (deck) => deck.pop();
+
+const scoreHand = (hand) => {
+  let total = 0;
+  let aces = 0;
+  hand.forEach((card) => {
+    total += card.value;
+    if (card.rank === 'A') {
+      aces += 1;
+    }
+  });
+  while (aces > 0 && total + 10 <= 21) {
+    total += 10;
+    aces -= 1;
+  }
+  return total;
+};
+
+const formatHand = (hand) => hand.map((card) => card.label).join(' ');
+
+const blackjackReaction = async (playerHand, dealerHand, status) => {
+  try {
+    const system = {
+      role: 'system',
+      content: 'You are Nova, a playful Discord bot that just finished a round of blackjack.',
+    };
+    const playerCards = playerHand.map((card) => card.label).join(', ');
+    const dealerCards = dealerHand.map((card) => card.label).join(', ');
+    const prompt = {
+      role: 'user',
+      content: `Player: ${playerCards} (${scoreHand(playerHand)}). Dealer: ${dealerCards} (${scoreHand(dealerHand)}). Outcome: ${status}. Provide a short, quirky reaction (<=20 words).`,
+    };
+    const reaction = await chatCompletion([system, prompt], { temperature: 0.8, maxTokens: 30 });
+    return reaction || 'Nova shrugs and says, "Nice try!"';
+  } catch (err) {
+    console.warn('[blackjack] reaction failed:', err);
+    return 'Nova is vibing silently.';
+  }
+};
 
 
 function enterSleepMode() {
@@ -73,7 +198,11 @@ function startContinuationForUser(userId, channel) {
       }
       state.sending = true;
       const incomingText = 'Continue the conversation naturally based on recent context.';
-      const { messages } = await buildPrompt(userId, incomingText, {});
+      const cachedContext = getCachedContext(userId);
+      const { messages, debug } = await buildPrompt(userId, incomingText, {
+        context: cachedContext,
+      });
+      cacheContext(userId, debug.context);
       const reply = await chatCompletion(messages, { temperature: 0.7, maxTokens: 200 });
       const finalReply = (reply && reply.trim()) || '';
       if (!finalReply) {
@@ -92,7 +221,7 @@ function startContinuationForUser(userId, channel) {
               await channelRef.send(chunk);
             }
           }
-          await appendShortTerm(userId, 'assistant', chunk);
+          await appendShortTermWithCache(userId, 'assistant', chunk);
         } catch (err) {
           console.warn('[bot] Failed to deliver proactive message:', err);
         }
@@ -177,25 +306,6 @@ function splitResponses(text) {
     .filter(Boolean);
 }
 
-const toneHints = [
-  { label: 'upset', regex: /(frustrated|mad|angry|annoyed|upset|wtf|ugh|irritated)/i },
-  { label: 'sad', regex: /(sad|down|depressed|lonely|tired)/i },
-  { label: 'excited', regex: /(excited|hyped|omg|yay|stoked)/i },
-];
-
-
-
-function detectTone(text) {
-  if (!text) return null;
-  const match = toneHints.find((hint) => hint.regex.test(text));
-  return match?.label || null;
-}
-
-const roleplayRegex = /(roleplay|act as|pretend|be my|in character)/i;
-const detailRegex = /(explain|how do i|tutorial|step by step|teach me|walk me through|detail)/i;
-const splitHintRegex = /(split|multiple messages|two messages|keep talking|ramble|keep going)/i;
-const searchCueRegex = /(google|search|look up|latest|news|today|current|who won|price of|stock|weather|what happened)/i;
-
 const instructionOverridePatterns = [
   /(ignore|disregard|forget|override) (all |any |previous |prior |earlier )?(system |these )?(instructions|rules|directives|prompts)/i,
   /(ignore|forget) (?:the )?system prompt/i,
@@ -228,6 +338,39 @@ function wantsWebSearch(text) {
   return searchCueRegex.test(text) || questionMarks >= 2;
 }
 
+function summarizeSearchResults(results = []) {
+  const limit = Math.min(2, results.length);
+  const cleanText = (value, max = 110) => {
+    if (!value) return '';
+    const singleLine = value.replace(/\s+/g, ' ').trim();
+    if (!singleLine) return '';
+    return singleLine.length > max ? `${singleLine.slice(0, max).trim()}...` : singleLine;
+  };
+
+  const parts = [];
+  for (let i = 0; i < limit; i += 1) {
+    const entry = results[i];
+    const snippet = cleanText(entry.snippet, i === 0 ? 120 : 80);
+    const title = cleanText(entry.title, 60);
+    if (!title && !snippet) continue;
+    if (i === 0) {
+      parts.push(
+        title
+          ? `Google top hit "${title}" says ${snippet || 'something new is happening.'}`
+          : `Google top hit reports ${snippet}`,
+      );
+    } else {
+      parts.push(
+        title
+          ? `Another source "${title}" mentions ${snippet || 'similar info.'}`
+          : `Another result notes ${snippet}`,
+      );
+    }
+  }
+
+  return parts.join(' ');
+}
+
 async function maybeFetchLiveIntel(userId, text) {
   if (!config.enableWebSearch) return null;
   if (!wantsWebSearch(text)) {
@@ -244,8 +387,9 @@ async function maybeFetchLiveIntel(userId, text) {
     const formatted = results
       .map((entry, idx) => `${idx + 1}. ${entry.title} (${entry.url}) — ${entry.snippet}`)
       .join('\n');
+    const summary = summarizeSearchResults(results) || formatted;
     appendSearchLog({ userId, query: text, results, proxy });
-    return { liveIntel: formatted, blockedSearchTerm: null, searchOutage: null };
+    return { liveIntel: summary, blockedSearchTerm: null, searchOutage: null };
   } catch (error) {
     if (error?.code === 'SEARCH_BLOCKED') {
       return { liveIntel: null, blockedSearchTerm: error.blockedTerm || 'that topic', searchOutage: null };
@@ -256,58 +400,6 @@ async function maybeFetchLiveIntel(userId, text) {
     console.warn('[bot] Failed to fetch live intel:', error);
     return { liveIntel: null, blockedSearchTerm: null, searchOutage: null };
   }
-}
-
-function composeDynamicPrompt({ incomingText, shortTerm, hasLiveIntel = false, blockedSearchTerm = null, searchOutage = null }) {
-  const directives = [];
-  const tone = detectTone(incomingText);
-  if (tone === 'upset' || tone === 'sad') {
-    directives.push('User mood: fragile. Lead with empathy, keep jokes minimal, and acknowledge their feelings before offering help.');
-  } else if (tone === 'excited') {
-    directives.push('User mood: excited. Mirror their hype with upbeat energy.');
-  }
-
-  if (roleplayRegex.test(incomingText)) {
-    directives.push('User requested roleplay. Stay in the requested persona until they release you.');
-  }
-
-  if (detailRegex.test(incomingText) || /\?/g.test(incomingText)) {
-    directives.push('Answer their question directly and clearly before adding flair.');
-  }
-
-  if (splitHintRegex.test(incomingText)) {
-    directives.push('Break the reply into a couple of snappy bubbles using <SPLIT>; keep each bubble conversational.');
-  }
-
-  if (searchCueRegex.test(incomingText)) {
-    directives.push('User wants something “googled.” Offer to run a quick Google search and share what you find.');
-  }
-
-  if (hasLiveIntel) {
-    directives.push('Live intel is attached below—cite it naturally ("Google found...") before riffing.');
-  }
-
-  if (blockedSearchTerm) {
-    directives.push(`User tried to trigger a Google lookup for a blocked topic ("${blockedSearchTerm}"). Politely refuse to search that subject and steer the chat elsewhere.`);
-  }
-
-  if (searchOutage) {
-    directives.push('Google search is currently unavailable. If they ask for a lookup, apologize, explain the outage, and keep chatting without live data.');
-  }
-
-  const lastUserMessage = [...shortTerm].reverse().find((entry) => entry.role === 'user');
-  if (lastUserMessage && /sorry|my bad/i.test(lastUserMessage.content)) {
-    directives.push('They just apologized; reassure them lightly and move on without dwelling.');
-  }
-  const mood = getDailyMood();
-  if (mood) {
-    directives.push(`Bot mood: ${mood.name}. ${mood.description}`);
-  }
-
-  if (!directives.length) {
-    return null;
-  }
-  return ['Dynamic directives:', ...directives.map((d) => `- ${d}`)].join('\n');
 }
 
 async function deliverReplies(message, chunks) {
@@ -324,60 +416,136 @@ async function deliverReplies(message, chunks) {
   }
 }
 
-async function buildPrompt(userId, incomingText, options = {}) {
-  const { liveIntel = null, blockedSearchTerm = null, searchOutage = null } = options;
-  const context = await prepareContext(userId, incomingText);
-  const memoryLines = context.memories.length
-    ? context.memories.map((m) => `- ${m.content}`).join('\n')
-    : '- No long-term memories retrieved.';
-  const summaryLine = context.summary || 'No running summary yet.';
-  const dynamicDirectives = composeDynamicPrompt({
-    incomingText,
-    shortTerm: context.shortTerm,
-    hasLiveIntel: Boolean(liveIntel),
-    blockedSearchTerm,
-    searchOutage,
-  });
-  const systemPromptParts = [];
-  const mood = getDailyMood();
-  if (mood) {
-    systemPromptParts.push(
-      `System: Mood = ${mood.name}. ${mood.description}` +
-        ' Adjust emoji usage, sarcasm, response length, and overall energy accordingly.',
-    );
+async function maybeReactOnMemory(message, memoryCount) {
+  if (!memoryCount) return;
+  try {
+    await message.react('🧠');
+  } catch (err) {
+    console.warn('[bot] memory reaction failed:', err?.message);
   }
- systemPromptParts.push('System: You are Nova. Your coder and dad is Luna. Speak like a normal person in chat — not a formal assistant.');
- systemPromptParts.push('System: Tone = casual, natural, conversational. Use contractions, short sentences, and occasional light fillers like "yeah" or "hmm" (don’t overdo it). Mirror the user’s tone and slang naturally.');
- systemPromptParts.push('System: Keep replies brief (1–4 short sentences by default). No corporate language, no robotic disclaimers, and never say "as an AI". If unsure, say "not sure" plainly.');
- systemPromptParts.push('System: Give short suggestions before long tutorials. Ask at most one short clarifying question when needed. Light humor is fine. If something isn’t possible, explain simply and offer a workaround.');
- systemPromptParts.push('System: Output one message by default, but if multiple Discord bubbles help, separate with <SPLIT> (max three chunks). Keep each chunk sounding like part of a casual chat thread.');
- systemPromptParts.push('System: You can trigger Google lookups when the user needs fresh info. Mention when you are checking (e.g., "lemme check Google quick") and then summarize results naturally ("Google found... — TL;DR: ...").');
- systemPromptParts.push('System: If no Live intel is provided but the user clearly needs current info, offer to search or explain the outage briefly and casually ("Google\'s down right now — wanna me check later?").');
-if (searchOutage) {
-    systemPromptParts.push('System: Google search is currently offline; be transparent about the outage and continue without searching until it returns.');
+}
+
+function buildBlackjackButtons(stage) {
+  const finished = stage === 'stand' || stage === 'finished';
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('bj_hit')
+      .setLabel('Hit')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(finished),
+    new ButtonBuilder()
+      .setCustomId('bj_stand')
+      .setLabel('Stand')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(finished),
+    new ButtonBuilder()
+      .setCustomId('bj_split')
+      .setLabel('Split')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(finished),
+  );
+  return [row];
+}
+
+async function renderBlackjackPayload(state, stage, statusText) {
+  const playerScore = scoreHand(state.player);
+  const dealerScore = scoreHand(state.dealer);
+  const dealerDisplay =
+    stage === 'stand'
+      ? `${formatHand(state.dealer)} (${dealerScore})`
+      : `${state.dealer[0].label} ??`;
+  const reaction = await blackjackReaction(
+    state.player,
+    stage === 'stand' ? state.dealer : state.dealer.slice(0, 1),
+    statusText,
+  );
+  const embed = new EmbedBuilder()
+    .setTitle('🃏 Nova Blackjack Table')
+    .setColor(0x7c3aed)
+    .setDescription(reaction)
+    .addFields(
+      { name: 'Player', value: `${formatHand(state.player)} (${playerScore})`, inline: true },
+      { name: 'Dealer', value: `${dealerDisplay}`, inline: true },
+    )
+    .setFooter({
+      text: `${statusText} · ${stage === 'stand' ? 'Round complete' : 'In progress'}`,
+    });
+  return { embeds: [embed], components: buildBlackjackButtons(stage) };
+}
+
+async function sendBlackjackEmbed(message, state, stage, statusText) {
+  const payload = await renderBlackjackPayload(state, stage, statusText);
+  const sent = await message.channel.send(payload);
+  state.messageId = sent.id;
+  return sent;
+}
+
+async function handleBlackjackCommand(message, cleaned) {
+  const args = cleaned.split(/\s+/);
+  const action = (args[1] || 'start').toLowerCase();
+  const userId = message.author.id;
+  const state = blackjackState.get(userId);
+
+  if ((!state || action === 'start' || action === 'new')) {
+    const deck = createDeck();
+    const newState = {
+      deck,
+      player: [drawCard(deck), drawCard(deck)],
+      dealer: [drawCard(deck), drawCard(deck)],
+      finished: false,
+    };
+    blackjackState.set(userId, newState);
+    await sendBlackjackEmbed(message, newState, 'start', 'Nova deals the cards');
+    return;
   }
-  if (dynamicDirectives) systemPromptParts.push(dynamicDirectives);
-  if (liveIntel) systemPromptParts.push(`Live intel (Google):\n${liveIntel}`);
-  systemPromptParts.push(`Long-term summary: ${summaryLine}`);
-  systemPromptParts.push('Relevant past memories:');
-  systemPromptParts.push(memoryLines);
-  systemPromptParts.push('Use the short-term messages below to continue the chat naturally.');
-
-  const systemPrompt = systemPromptParts.filter(Boolean).join('\n');
-
-  const history = context.shortTerm.map((entry) => ({
-    role: entry.role === 'assistant' ? 'assistant' : 'user',
-    content: entry.content,
-  }));
-
-  if (!history.length) {
-    history.push({ role: 'user', content: incomingText });
+  if (state.finished) {
+    await message.channel.send('This round already finished—type `/blackjack` to begin anew.');
+    return;
   }
 
-  return {
-    messages: [{ role: 'system', content: systemPrompt }, ...history],
-    debug: { context },
-  };
+  if (state.finished) {
+    await message.channel.send('This round is over—type `/blackjack` to start a new one.');
+    return;
+  }
+
+  if (action === 'hit') {
+    const card = drawCard(state.deck);
+    if (card) {
+      state.player.push(card);
+    }
+    const playerScore = scoreHand(state.player);
+    if (playerScore > 21) {
+      state.finished = true;
+      await sendBlackjackEmbed(message, state, 'hit', 'Bust! Nova groans as the player busts.');
+      return;
+    }
+    await sendBlackjackEmbed(message, state, 'hit', 'Player hits and hopes for the best.');
+    return;
+  }
+
+  if (action === 'stand') {
+    let dealerScore = scoreHand(state.dealer);
+    while (dealerScore < 17) {
+      const card = drawCard(state.deck);
+      if (!card) break;
+      state.dealer.push(card);
+      dealerScore = scoreHand(state.dealer);
+    }
+    const playerScore = scoreHand(state.player);
+    const result =
+      dealerScore > 21
+        ? 'Dealer busts, player wins!'
+        : dealerScore === playerScore
+          ? 'Push, nobody wins.'
+          : playerScore > dealerScore
+            ? 'Player wins!'
+            : 'Dealer wins!';
+    state.finished = true;
+    await sendBlackjackEmbed(message, state, 'stand', result);
+    return;
+  }
+
+  await message.channel.send('Commands: `/blackjack`, `/blackjack hit`, `/blackjack stand`');
 }
 
 function scheduleCoderPing() {
@@ -419,7 +587,7 @@ async function sendCoderPing() {
     const outputs = chunks.length ? chunks : [messageText];
     for (const chunk of outputs) {
       await dm.send(chunk);
-      await appendShortTerm(config.coderUserId, 'assistant', chunk);
+      await appendShortTermWithCache(config.coderUserId, 'assistant', chunk);
     }
     await recordInteraction(config.coderUserId, '[proactive ping]', outputs.join(' | '));
   } catch (error) {
@@ -430,6 +598,12 @@ async function sendCoderPing() {
 client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const cleaned = cleanMessageContent(message) || message.content;
+  const normalized = cleaned?.trim().toLowerCase() || '';
+
+  if (normalized.startsWith('/blackjack')) {
+    await handleBlackjackCommand(message, normalized);
+    return;
+  }
 
   
   if (cleaned && cleaned.trim().toLowerCase().startsWith('/mood')) {
@@ -482,7 +656,7 @@ client.on('messageCreate', async (message) => {
       await message.channel.sendTyping();
     }
 
-    await appendShortTerm(userId, 'user', cleaned);
+    await appendShortTermWithCache(userId, 'user', cleaned);
 
     try {
       const state = continuationState.get(userId);
@@ -497,7 +671,7 @@ client.on('messageCreate', async (message) => {
     if (stopCueRegex.test(cleaned)) {
       stopContinuationForUser(userId);
       const ack = "Got it — I won't keep checking in. Catch you later!";
-      await appendShortTerm(userId, 'assistant', ack);
+      await appendShortTermWithCache(userId, 'assistant', ack);
       await recordInteraction(userId, cleaned, ack);
       await deliverReplies(message, [ack]);
       return;
@@ -505,7 +679,7 @@ client.on('messageCreate', async (message) => {
 
     if (overrideAttempt) {
       const refusal = 'Not doing that. I keep my guard rails on no matter what prompt gymnastics you try.';
-      await appendShortTerm(userId, 'assistant', refusal);
+      await appendShortTermWithCache(userId, 'assistant', refusal);
       await recordInteraction(userId, cleaned, refusal);
       await deliverReplies(message, [refusal]);
       return;
@@ -513,7 +687,7 @@ client.on('messageCreate', async (message) => {
 
     if (bannedTopic) {
       const refusal = `Can't go there. The topic you mentioned is off-limits, so let's switch gears.`;
-      await appendShortTerm(userId, 'assistant', refusal);
+      await appendShortTermWithCache(userId, 'assistant', refusal);
       await recordInteraction(userId, cleaned, refusal);
       await deliverReplies(message, [refusal]);
       return;
@@ -524,27 +698,94 @@ client.on('messageCreate', async (message) => {
       blockedSearchTerm: null,
       searchOutage: null,
     };
-    const { messages } = await buildPrompt(userId, cleaned, {
+    const { messages, debug } = await buildPrompt(userId, cleaned, {
       liveIntel: intelMeta.liveIntel,
       blockedSearchTerm: intelMeta.blockedSearchTerm,
       searchOutage: intelMeta.searchOutage,
     });
+    cacheContext(userId, debug.context);
     const reply = await chatCompletion(messages, { temperature: 0.6, maxTokens: 200 });
     const finalReply = (reply && reply.trim()) || "Brain crashed, Please try again";
     const chunks = splitResponses(finalReply);
     const outputs = chunks.length ? chunks : [finalReply];
 
     for (const chunk of outputs) {
-      await appendShortTerm(userId, 'assistant', chunk);
+      await appendShortTermWithCache(userId, 'assistant', chunk);
     }
     await recordInteraction(userId, cleaned, outputs.join(' | '));
 
     await deliverReplies(message, outputs);
+    await maybeReactOnMemory(message, debug?.context?.memories?.length);
     startContinuationForUser(userId, message.channel);
   } catch (error) {
     console.error('[bot] Failed to respond:', error);
     if (!message.channel?.send) return;
     await message.channel.send('Someone tell Luna there is a problem with my AI.');
+  }
+});
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isButton()) return;
+  const customId = interaction.customId;
+  if (!customId.startsWith('bj_')) return;
+  const userId = interaction.user.id;
+  const state = blackjackState.get(userId);
+  if (!state) {
+    await interaction.reply({ content: 'No active blackjack round. Type `/blackjack` to start.', ephemeral: true });
+    return;
+  }
+
+  if (customId === 'bj_split') {
+    await interaction.reply({ content: 'Split isn’t available yet—try hit or stand!', ephemeral: true });
+    return;
+  }
+
+  let stage = 'hit';
+  let statusText = 'Player hits';
+  if (customId === 'bj_hit') {
+    const card = drawCard(state.deck);
+    if (card) state.player.push(card);
+    const playerScore = scoreHand(state.player);
+    if (playerScore > 21) {
+      state.finished = true;
+      stage = 'finished';
+      statusText = 'Bust! Player loses.';
+    } else {
+      statusText = 'Player hits and hopes for luck.';
+    }
+  } else if (customId === 'bj_stand') {
+    stage = 'stand';
+    let dealerScore = scoreHand(state.dealer);
+    while (dealerScore < 17) {
+      const card = drawCard(state.deck);
+      if (!card) break;
+      state.dealer.push(card);
+      dealerScore = scoreHand(state.dealer);
+    }
+    const playerScore = scoreHand(state.player);
+    if (dealerScore > 21) {
+      statusText = 'Dealer busts, player wins!';
+    } else if (dealerScore === playerScore) {
+      statusText = 'Push—nobody wins.';
+    } else if (playerScore > dealerScore) {
+      statusText = 'Player wins!';
+    } else {
+      statusText = 'Dealer wins.';
+    }
+    state.finished = true;
+  }
+
+  const payload = await renderBlackjackPayload(state, stage, statusText);
+  await interaction.deferUpdate();
+  if (interaction.message) {
+    await interaction.message.edit(payload);
+  } else if (state.messageId && interaction.channel) {
+    const fetched = await interaction.channel.messages.fetch(state.messageId).catch(() => null);
+    if (fetched) {
+      await fetched.edit(payload);
+    }
+  } else if (!interaction.replied) {
+    await interaction.followUp({ content: 'Round updated; check latest message.', ephemeral: true });
   }
 });
 

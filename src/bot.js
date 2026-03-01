@@ -19,6 +19,9 @@ let coderPingTimer;
 const continuationState = new Map();
 let isSleeping = false;
 
+// mood override for testing
+let overrideMood = null;
+
 function enterSleepMode() {
   if (isSleeping) return;
   console.log('[bot] entering sleep mode: pausing coder pings and proactive continuation');
@@ -120,6 +123,8 @@ function stopContinuationForUser(userId) {
 client.once('clientReady', () => {
   console.log(`[bot] Logged in as ${client.user.tag}`);
   scheduleCoderPing();
+  const m = getDailyMood();
+  console.log(`[bot] current mood on startup: ${m.name} — ${m.description}`);
 });
 
 function shouldRespond(message) {
@@ -155,6 +160,28 @@ const toneHints = [
   { label: 'excited', regex: /(excited|hyped|omg|yay|stoked)/i },
 ];
 
+const dailyMoods = [
+  ['Calm','Soft tone; minimal emojis; low sarcasm; concise and soothing.'],
+  ['Goblin','Chaotic, high‑energy replies; random emojis; extra sarcasm and hype.'],
+  ['Philosopher','Deep, reflective answers; longer and thoughtful, a bit poetic.'],
+  ['Hype','Enthusiastic and upbeat; lots of exclamation marks, emojis and hype.'],
+  ['Sassy','Playful sarcasm without being mean; snappy replies and quips.'],
+].map(([n,d])=>({name:n,description:d}));
+
+function getDailyMood() {
+  if (overrideMood) return overrideMood;
+  const day = Math.floor(Date.now() / 86400000);
+  return dailyMoods[day % dailyMoods.length];
+}
+
+function setMoodByName(name) {
+  if (!name) return null;
+  const found = dailyMoods.find((m) => m.name.toLowerCase() === name.toLowerCase());
+  if (found) overrideMood = found;
+  return found;
+}
+
+
 function detectTone(text) {
   if (!text) return null;
   const match = toneHints.find((hint) => hint.regex.test(text));
@@ -179,6 +206,19 @@ function isInstructionOverrideAttempt(text) {
   return instructionOverridePatterns.some((pattern) => pattern.test(text));
 }
 
+async function shouldSearchTopic(text) {
+  if (!text) return false;
+  const system = { role: 'system', content: 'You are a gatekeeper that decides if a user message would benefit from a live web search for up-to-date information. Respond with only "yes" or "no".' };
+  const user = { role: 'user', content: `Should I perform a web search for the following user message?\n\n${text}` };
+  try {
+    const answer = await chatCompletion([system, user], { temperature: 0.0, maxTokens: 10 });
+    return /^yes/i.test(answer.trim());
+  } catch (err) {
+    console.warn('[bot] search-decision LLM failed:', err);
+    return false;
+  }
+}
+
 function wantsWebSearch(text) {
   if (!text) return false;
   const questionMarks = (text.match(/\?/g) || []).length;
@@ -187,7 +227,12 @@ function wantsWebSearch(text) {
 
 async function maybeFetchLiveIntel(userId, text) {
   if (!config.enableWebSearch) return null;
-  if (!wantsWebSearch(text)) return null;
+  if (!wantsWebSearch(text)) {
+    const ask = await shouldSearchTopic(text);
+    if (!ask) {
+      return null;
+    }
+  }
   try {
     const { results, proxy } = await searchWeb(text, 3);
     if (!results.length) {
@@ -251,6 +296,10 @@ function composeDynamicPrompt({ incomingText, shortTerm, hasLiveIntel = false, b
   if (lastUserMessage && /sorry|my bad/i.test(lastUserMessage.content)) {
     directives.push('They just apologized; reassure them lightly and move on without dwelling.');
   }
+  const mood = getDailyMood();
+  if (mood) {
+    directives.push(`Bot mood: ${mood.name}. ${mood.description}`);
+  }
 
   if (!directives.length) {
     return null;
@@ -287,6 +336,13 @@ async function buildPrompt(userId, incomingText, options = {}) {
     searchOutage,
   });
   const systemPromptParts = [];
+  const mood = getDailyMood();
+  if (mood) {
+    systemPromptParts.push(
+      `System: Mood = ${mood.name}. ${mood.description}` +
+        ' Adjust emoji usage, sarcasm, response length, and overall energy accordingly.',
+    );
+  }
   systemPromptParts.push('System: Your name is Nova. Your coder and dad is Luna. Speak like a regular person in chat — not like a formal assistant.');
   systemPromptParts.push(
     'System: Be specific about how to be casual. Use contractions (I\'m, you\'re), short sentences, and occasional sentence fragments. It\'s fine to start with "oh", "yeah", "hmm", or "nah". Use simple phrases: "sounds good", "sure", "nope", "lemme see", "gonna try".'
@@ -383,7 +439,33 @@ client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const cleaned = cleanMessageContent(message) || message.content;
 
-  // allow the coder to toggle sleep mode regardless of current `isSleeping` state
+  
+  if (cleaned && cleaned.trim().toLowerCase().startsWith('/mood')) {
+    const parts = cleaned.trim().split(/\s+/);
+    if (parts.length === 1) {
+      const m = getDailyMood();
+      await message.channel.send(`Today's mood is **${m.name}**: ${m.description}`);
+      return;
+    }
+    if (userId === config.coderUserId) {
+      const arg = parts.slice(1).join(' ');
+      if (arg.toLowerCase() === 'reset' || arg.toLowerCase() === 'clear') {
+        overrideMood = null;
+        await message.channel.send('Mood override cleared; reverting to daily cycle.');
+        console.log('[bot] mood override reset');
+        return;
+      }
+      const picked = setMoodByName(arg);
+      if (picked) {
+        await message.channel.send(`Override mood set to **${picked.name}**`);
+      } else {
+        await message.channel.send(`Unknown mood "${arg}". Available: ${dailyMoods.map((m) => m.name).join(', ')}, or use /mood reset.`);
+      }
+      return;
+    }
+    return;
+  }
+
   if (cleaned && cleaned.trim().toLowerCase() === '/sleep' && userId === config.coderUserId) {
     if (isSleeping) {
       exitSleepMode();
@@ -397,7 +479,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  if (isSleeping) return; // ignore other messages while sleeping
+  if (isSleeping) return;
 
   if (!shouldRespond(message)) return;
   const overrideAttempt = isInstructionOverrideAttempt(cleaned);
@@ -420,7 +502,6 @@ client.on('messageCreate', async (message) => {
       console.warn('[bot] Failed to reset continuation timer:', err);
     }
 
-    // If the user indicates they are leaving, stop proactive continuation
     if (stopCueRegex.test(cleaned)) {
       stopContinuationForUser(userId);
       const ack = "Got it — I won't keep checking in. Catch you later!";
@@ -467,7 +548,6 @@ client.on('messageCreate', async (message) => {
     await recordInteraction(userId, cleaned, outputs.join(' | '));
 
     await deliverReplies(message, outputs);
-    // enable proactive continuation for this user (will send follow-ups when they're quiet)
     startContinuationForUser(userId, message.channel);
   } catch (error) {
     console.error('[bot] Failed to respond:', error);

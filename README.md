@@ -6,6 +6,9 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - Conversational replies in DMs automatically; replies in servers when mentioned or in a pinned channel.
 - Chat model (defaults to `meta-llama/llama-3-8b-instruct` when using OpenRouter) for dialogue and a low-cost embedding model (`nvidia/llama-nemotron-embed-vl-1b-v2` by default). OpenAI keys/models may be used as a fallback.
 - Short-term, long-term, and summarized memory layers with cosine-similarity retrieval.
+- **Rotating “daily mood” engine** that adjusts Nova’s personality each day (calm, goblin, philosopher, etc.). Mood influences emoji use, sarcasm, response length, and hype.
+- **Smarter live‑intel web search**: Nova now tries to detect when you’re discussing a specific topic (games, movies, proper‑nouns) and will automatically Google it to enrich context. It’s not triggered by every message, just enough to catch “outside” topics.
+
 - Automatic memory pruning, importance scoring, and transcript summarization when chats grow long.
 - Local SQLite memory file (no extra infrastructure) powered by `sql.js`, plus graceful retries for the model API (OpenRouter/OpenAI).
 - Optional "miss u" pings that DM your coder at random intervals (0–6h) when `CODER_USER_ID` is set.
@@ -83,7 +86,8 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
    ## Conversation Flow
    1. Incoming message triggers only if it is a DM, mentions the bot, or appears in the configured channel.
    2. The user turn is appended to short-term memory immediately.
-   3. The memory engine retrieves relevant long-term memories and summary text.
+   3. The memory engine also factors in today’s “mood” directive (e.g. calm, goblin, philosopher) when building the prompt, so the bot’s style changes daily.
+   4. The memory engine retrieves relevant long-term memories and summary text.
    4. A compact system prompt injects personality, summary, and relevant memories before passing short-term history to the model API (OpenRouter/OpenAI).
    5. The reply is sent back to Discord. If Nova wants to send a burst of thoughts, she emits the `<SPLIT>` token and the runtime fans it out into multiple sequential Discord messages.
    6. Long chats automatically summarize; low-value memories eventually get pruned.

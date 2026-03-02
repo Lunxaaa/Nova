@@ -6,7 +6,7 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - Added token-usage + performance optimizations (prompt builder + context caching + smaller injected payloads).
 - Upgraded the local memory dashboard: long-term memory create/edit, pagination (15 per page), search preview helper, and a recall timeline view.
 - Added Discord-side extras: `🧠` memory-injected reaction badge + a `/blackjack` embed mini-game with buttons.
-- Full session log lives in `CHANGELOG.md` (and is mirrored below).
+- Full session log lives in `CHANGELOG.md` (and is mirrored below). test
 
 <details>
 <summary>Full update log (session)</summary>

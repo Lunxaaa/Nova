@@ -7,6 +7,16 @@ dotenv.config();
 const defaultMemoryDbFile = fileURLToPath(new URL('../data/memory.sqlite', import.meta.url));
 const legacyMemoryFile = fileURLToPath(new URL('../data/memory.json', import.meta.url));
 
+const memoryRecallTriggerPatterns = [
+  /remember( when| that)?/i,
+  /do you know( about)?/i,
+  /do you remember/i,
+  /\bwe talked\b/i,
+  /\brecall\b/i,
+  /\bremind\b/i,
+  /\brefresh my memory\b/i,
+];
+
 const requiredEnv = ['DISCORD_TOKEN'];
 requiredEnv.forEach((key) => {
   if (!process.env[key]) {
@@ -33,10 +43,15 @@ export const config = {
   memoryDbFile: process.env.MEMORY_DB_FILE ? path.resolve(process.env.MEMORY_DB_FILE) : defaultMemoryDbFile,
   legacyMemoryFile,
   summaryTriggerChars: 2200,
+  summaryTriggerTurns: process.env.SUMMARY_TRIGGER_TURNS ? parseInt(process.env.SUMMARY_TRIGGER_TURNS, 10) : 12,
   memoryPruneThreshold: 0.2,
   memoryCooldownMs: process.env.MEMORY_COOLDOWN_MS ? parseInt(process.env.MEMORY_COOLDOWN_MS, 10) : 3 * 60 * 1000,
   maxMemories: 8000,
   enableShortTermSummary: process.env.ENABLE_SHORT_TERM_SUMMARY !== 'false',
+  memoryRecallSimilarityThreshold: process.env.MEMORY_RECALL_SIMILARITY_THRESHOLD
+    ? parseFloat(process.env.MEMORY_RECALL_SIMILARITY_THRESHOLD)
+    : 0.62,
+  memoryRecallTriggerPatterns,
   relevantMemoryCount: 3,
   longTermFetchLimit: 120,
   // Optional local dashboard that runs alongside the bot. Enable with

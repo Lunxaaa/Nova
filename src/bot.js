@@ -22,8 +22,14 @@ let coderPingTimer;
 const continuationState = new Map();
 let isSleeping = false;
 
+const recallPatterns = config.memoryRecallTriggerPatterns || [];
 const contextCache = new Map();
 const CONTEXT_CACHE_TTL_MS = 2 * 60 * 1000;
+
+function matchesMemoryRecallCue(text) {
+  if (!text) return false;
+  return recallPatterns.some((pattern) => pattern.test(text));
+}
 
 const cloneShortTerm = (entries = []) => entries.map((entry) => ({ ...entry }));
 const cloneMemories = (entries = []) => entries.map((entry) => ({ ...entry }));
@@ -203,6 +209,7 @@ function startContinuationForUser(userId, channel) {
       const { messages, debug } = await buildPrompt(userId, incomingText, {
         context: cachedContext,
         userName: cachedContext?.userName || null,
+        includeMemories: false,
       });
       cacheContext(userId, debug.context);
       const reply = await chatCompletion(messages, { temperature: 0.7, maxTokens: 200 });
@@ -687,6 +694,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    const recallTrigger = matchesMemoryRecallCue(cleaned);
     const intelMeta = (await maybeFetchLiveIntel(userId, cleaned)) || {
       liveIntel: null,
       blockedSearchTerm: null,
@@ -696,6 +704,8 @@ client.on('messageCreate', async (message) => {
       liveIntel: intelMeta.liveIntel,
       blockedSearchTerm: intelMeta.blockedSearchTerm,
       searchOutage: intelMeta.searchOutage,
+      includeMemories: recallTrigger,
+      similarityThreshold: config.memoryRecallSimilarityThreshold,
       userName: message.member?.displayName || message.author.username,
     });
     cacheContext(userId, debug.context);

@@ -242,7 +242,10 @@ const fullShortTerm = (db, userId) =>
 const maybeSummarize = async (db, userId) => {
   const shortTermEntries = fullShortTerm(db, userId);
   const charCount = shortTermEntries.reduce((sum, msg) => sum + (msg.content?.length || 0), 0);
-  if (charCount < config.summaryTriggerChars || shortTermEntries.length < config.shortTermLimit) {
+  if (
+    charCount < config.summaryTriggerChars &&
+    shortTermEntries.length < (config.summaryTriggerTurns || config.shortTermLimit)
+  ) {
     return false;
   }
   const userRow = get(db, 'SELECT summary FROM users WHERE id = ?', [userId]) || { summary: '' };
@@ -327,7 +330,7 @@ const retrieveRelevantMemories = async (db, userId, query, options = {}) => {
     return [];
   }
   const limit = config.longTermFetchLimit || 200;
-  const { includeAllUsers = false } = options;
+  const { includeAllUsers = false, minScore = Number.NEGATIVE_INFINITY } = options;
   const params = [];
   const whereClause = includeAllUsers ? '' : ' WHERE user_id = ?';
   if (!includeAllUsers) {
@@ -344,7 +347,7 @@ const retrieveRelevantMemories = async (db, userId, query, options = {}) => {
   }
   const now = Date.now();
   const cooldown = config.memoryCooldownMs || 0;
-  const usage = memoryUsageMap.get(userId);
+  const usage = getMemoryUsageMapForUser(userId);
   const eligibleRows =
     cooldown && usage
       ? rows.filter((entry) => now - (usage.get(entry.id) || 0) > cooldown)
@@ -360,13 +363,13 @@ const retrieveRelevantMemories = async (db, userId, query, options = {}) => {
         score: cosineSimilarity(queryEmbedding, embedding) + entry.importance * 0.1,
       };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, config.relevantMemoryCount);
-  if (scored.length) {
-    const usageMap = getMemoryUsageMapForUser(userId);
-    scored.forEach((entry) => usageMap.set(entry.id, now));
+    .sort((a, b) => b.score - a.score);
+  const filtered = scored.filter((entry) => entry.score >= minScore);
+  const capped = filtered.slice(0, config.relevantMemoryCount);
+  if (capped.length) {
+    capped.forEach((entry) => usage.set(entry.id, now));
   }
-  return scored;
+  return capped;
 };
 
 export async function appendShortTerm(userId, role, content) {
@@ -390,8 +393,18 @@ export async function prepareContext(userId, incomingMessage, options = {}) {
   ensureUser(db, userId);
   const userRow = get(db, 'SELECT summary FROM users WHERE id = ?', [userId]) || { summary: '' };
   const shortTerm = getShortTermHistory(db, userId, config.shortTermLimit);
-  const { includeAllUsers = false } = options;
-  const memories = await retrieveRelevantMemories(db, userId, incomingMessage, { includeAllUsers });
+  const {
+    includeAllUsers = false,
+    includeLongTerm = true,
+    memorySimilarityThreshold = Number.NEGATIVE_INFINITY,
+  } = options;
+  const memories =
+    includeLongTerm && incomingMessage?.trim()
+      ? await retrieveRelevantMemories(db, userId, incomingMessage, {
+          includeAllUsers,
+          minScore: memorySimilarityThreshold,
+        })
+      : [];
   return {
     shortTerm,
     summary: userRow.summary || '',

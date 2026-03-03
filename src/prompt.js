@@ -95,9 +95,21 @@ export async function buildPrompt(userId, incomingText, options = {}) {
     context: providedContext = null,
     useGlobalMemories = false,
     userName = null,
+    includeMemories = false,
+    similarityThreshold = null,
   } = options;
   const context =
-    providedContext || (await prepareContext(userId, incomingText, { includeAllUsers: useGlobalMemories }));
+    providedContext ||
+    (await prepareContext(userId, incomingText, {
+      includeAllUsers: useGlobalMemories,
+      includeLongTerm: includeMemories || useGlobalMemories,
+      memorySimilarityThreshold:
+        includeMemories && similarityThreshold !== null
+          ? similarityThreshold
+          : includeMemories
+          ? config.memoryRecallSimilarityThreshold
+          : Number.NEGATIVE_INFINITY,
+    }));
   if (userName) {
     context.userName = userName;
   } else if (context.userName === undefined) {

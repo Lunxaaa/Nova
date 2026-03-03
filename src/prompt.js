@@ -94,9 +94,15 @@ export async function buildPrompt(userId, incomingText, options = {}) {
     searchOutage = null,
     context: providedContext = null,
     useGlobalMemories = false,
+    userName = null,
   } = options;
   const context =
     providedContext || (await prepareContext(userId, incomingText, { includeAllUsers: useGlobalMemories }));
+  if (userName) {
+    context.userName = userName;
+  } else if (context.userName === undefined) {
+    context.userName = null;
+  }
   const memoryLines = context.memories.length
     ? context.memories
         .map((m) =>
@@ -120,6 +126,11 @@ export async function buildPrompt(userId, incomingText, options = {}) {
       `System: Mood = ${mood.name}. ${mood.description}` +
         ' Adjust emoji usage, sarcasm, response length, and overall energy accordingly.',
     );
+  }
+  if (context.userName) {
+    systemPromptParts.push(`System: You are currently chatting with ${context.userName}. Anchor each reply to them.`);
+  } else {
+    systemPromptParts.push(`System: You are currently chatting with Discord user ${userId}. Keep that connection in mind.`);
   }
   systemPromptParts.push(STATIC_SYSTEM_PROMPT);
   if (searchOutage) {

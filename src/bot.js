@@ -37,6 +37,7 @@ function cacheContext(userId, context) {
     shortTerm: cloneShortTerm(context.shortTerm || []),
     summary: context.summary,
     memories: cloneMemories(context.memories || []),
+    userName: context.userName || null,
   };
   contextCache.set(userId, { context: snapshot, timestamp: Date.now() });
   return snapshot;
@@ -201,6 +202,7 @@ function startContinuationForUser(userId, channel) {
       const cachedContext = getCachedContext(userId);
       const { messages, debug } = await buildPrompt(userId, incomingText, {
         context: cachedContext,
+        userName: cachedContext?.userName || null,
       });
       cacheContext(userId, debug.context);
       const reply = await chatCompletion(messages, { temperature: 0.7, maxTokens: 200 });
@@ -694,6 +696,7 @@ client.on('messageCreate', async (message) => {
       liveIntel: intelMeta.liveIntel,
       blockedSearchTerm: intelMeta.blockedSearchTerm,
       searchOutage: intelMeta.searchOutage,
+      userName: message.member?.displayName || message.author.username,
     });
     cacheContext(userId, debug.context);
     const reply = await chatCompletion(messages, { temperature: 0.6, maxTokens: 200 });

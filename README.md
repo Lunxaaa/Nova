@@ -95,9 +95,9 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
    CHANGELOG.md
    ```
 
-   - **Short-term (recency buffer):** Last 10 conversation turns kept verbatim for style and continuity. Stored per user inside `data/memory.sqlite`.
+   - **Short-term (recency buffer):** Last turns kept verbatim for style and continuity. `SHORT_TERM_LIMIT` (default 12) controls how many of those turns persist, and you can lower it further if you prefer tighter buffers.
    - **Long-term (vector store):** Every user message + bot reply pair becomes an embedding via `text-embedding-3-small`. Embeddings, raw text, timestamps, and heuristic importance scores live in the same SQLite file. Retrieval uses cosine similarity plus a small importance boost; top 5 results feed the prompt.
-   - **Summary layer:** When the recency buffer grows past ~3000 characters, Nova asks OpenAI to condense the transcript to <120 words, keeps the summary, and trims the raw buffer down to the last few turns. This keeps token usage low while retaining story arcs.
+   - **Summary layer:** When the recency buffer grows past ~3000 characters, Nova asks OpenAI to condense the transcript to <120 words, keeps the summary, and trims the raw buffer down to the last few turns. This keeps token usage low while retaining story arcs, but you can disable it with `ENABLE_SHORT_TERM_SUMMARY=false` if you want the raw buffer to stay intact.
    - **Importance scoring:** Messages mentioning intent words ("plan", "remember", etc.), showing length, or emotional weight receive higher scores. When the store exceeds its cap, the lowest-importance/oldest memories are pruned. You can also call `pruneLowImportanceMemories()` manually if needed.
 
    - **Embedding math:** `text-embedding-3-small` returns 1,536 floating-point numbers for each text chunk. That giant array is a vector map of the message’s meaning; similar moments land near each other in 1,536-dimensional space.

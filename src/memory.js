@@ -379,7 +379,9 @@ export async function appendShortTerm(userId, role, content) {
     Date.now(),
   ]);
   enforceShortTermCap(db, userId);
-  await maybeSummarize(db, userId);
+  if (config.enableShortTermSummary) {
+    await maybeSummarize(db, userId);
+  }
   await persistDb(db);
 }
 

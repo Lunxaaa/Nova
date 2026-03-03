@@ -34,6 +34,7 @@ export const config = {
   legacyMemoryFile,
   summaryTriggerChars: 2200,
   memoryPruneThreshold: 0.2,
+  memoryCooldownMs: process.env.MEMORY_COOLDOWN_MS ? parseInt(process.env.MEMORY_COOLDOWN_MS, 10) : 3 * 60 * 1000,
   maxMemories: 8000,
   relevantMemoryCount: 3,
   longTermFetchLimit: 120,

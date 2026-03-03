@@ -102,8 +102,9 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 
    - **Embedding math:** `text-embedding-3-small` returns 1,536 floating-point numbers for each text chunk. That giant array is a vector map of the message’s meaning; similar moments land near each other in 1,536-dimensional space.
    - **What gets embedded:** After every user→bot turn, `recordInteraction()` (see [src/memory.js](src/memory.js)) bundles the pair, scores its importance, asks OpenAI for an embedding, and stores `{ content, embedding, importance, timestamp }` inside the SQLite tables.
-   - **Why so many numbers:** Cosine similarity needs raw vectors to compare new thoughts to past ones. When a fresh message arrives, `retrieveRelevantMemories()` embeds it too, calculates cosine similarity against every stored vector, adds a small importance boost, and returns the top five memories to inject into the system prompt.
-   - **Self-cleaning:** If the DB grows past the configured limits, low-importance items are trimmed, summaries compress the short-term transcript, and you can delete `data/memory.sqlite` to reset everything cleanly.
+- **Why so many numbers:** Cosine similarity needs raw vectors to compare new thoughts to past ones. When a fresh message arrives, `retrieveRelevantMemories()` embeds it too, calculates cosine similarity against every stored vector, adds a small importance boost, and returns the top five memories to inject into the system prompt.
+- **Memory cooldown:** `MEMORY_COOLDOWN_MS` (defaults to 180000 ms) keeps a long-term memory out of the retrieval window for a few minutes after it was just used so Nova has to pull fresh context before repeating herself, while still falling back automatically if there isn’t anything new to surface.
+- **Self-cleaning:** If the DB grows past the configured limits, low-importance items are trimmed, summaries compress the short-term transcript, and you can delete `data/memory.sqlite` to reset everything cleanly.
 
    ### Migrating legacy `memory.json`
    - Keep your original `data/memory.json` in place and delete/rename `data/memory.sqlite` before launching the bot.

@@ -41,6 +41,15 @@ const parseEmbedding = (raw) => {
   }
 };
 
+const memoryUsageMap = new Map();
+
+const getMemoryUsageMapForUser = (userId) => {
+  if (!memoryUsageMap.has(userId)) {
+    memoryUsageMap.set(userId, new Map());
+  }
+  return memoryUsageMap.get(userId);
+};
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const wasmDir = path.resolve(__dirname, '../node_modules/sql.js/dist');
 
@@ -333,8 +342,16 @@ const retrieveRelevantMemories = async (db, userId, query, options = {}) => {
   if (!rows.length) {
     return [];
   }
+  const now = Date.now();
+  const cooldown = config.memoryCooldownMs || 0;
+  const usage = memoryUsageMap.get(userId);
+  const eligibleRows =
+    cooldown && usage
+      ? rows.filter((entry) => now - (usage.get(entry.id) || 0) > cooldown)
+      : rows;
+  const rowsToScore = eligibleRows.length ? eligibleRows : rows;
   const queryEmbedding = await createEmbedding(query);
-  return rows
+  const scored = rowsToScore
     .map((entry) => {
       const embedding = parseEmbedding(entry.embedding);
       return {
@@ -345,6 +362,11 @@ const retrieveRelevantMemories = async (db, userId, query, options = {}) => {
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, config.relevantMemoryCount);
+  if (scored.length) {
+    const usageMap = getMemoryUsageMapForUser(userId);
+    scored.forEach((entry) => usageMap.set(entry.id, now));
+  }
+  return scored;
 };
 
 export async function appendShortTerm(userId, role, content) {

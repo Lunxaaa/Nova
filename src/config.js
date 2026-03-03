@@ -53,6 +53,7 @@ export const config = {
     : 0.62,
   memoryRecallTriggerPatterns,
   relevantMemoryCount: 3,
+  enableGlobalMemories: process.env.ENABLE_GLOBAL_MEMORIES !== 'false',
   longTermFetchLimit: 120,
   // Optional local dashboard that runs alongside the bot. Enable with
   // `ENABLE_DASHBOARD=true` and customize port with `DASHBOARD_PORT`.

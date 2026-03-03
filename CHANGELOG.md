@@ -47,3 +47,7 @@ All notable changes made during this working session (March 1, 2026).
 
 ### Configuration / examples
 - Updated `.env.example` to include `OPENAI_API_KEY`.
+
+### Global memory toggle (2026-03-03)
+- Added `useGlobalMemories` to `buildPrompt`, allowing long-term retrieval across every stored `user_id` without losing the current user's short-term history.
+- Long-term results now carry their `user_id` so the prompt can label each snippet (e.g., `- [userId] ...`) and the retrieval scoring still ranks by cosine similarity plus importance.

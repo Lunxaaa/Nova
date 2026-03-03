@@ -93,10 +93,16 @@ export async function buildPrompt(userId, incomingText, options = {}) {
     blockedSearchTerm = null,
     searchOutage = null,
     context: providedContext = null,
+    useGlobalMemories = false,
   } = options;
-  const context = providedContext || (await prepareContext(userId, incomingText));
+  const context =
+    providedContext || (await prepareContext(userId, incomingText, { includeAllUsers: useGlobalMemories }));
   const memoryLines = context.memories.length
-    ? context.memories.map((m) => `- ${m.content}`).join('\n')
+    ? context.memories
+        .map((m) =>
+          useGlobalMemories && m.user_id ? `- [${m.user_id}] ${m.content}` : `- ${m.content}`,
+        )
+        .join('\n')
     : '- No long-term memories retrieved.';
   const summaryLine = context.summary || 'No running summary yet.';
   const dynamicDirectives = composeDynamicPrompt({

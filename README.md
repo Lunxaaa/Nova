@@ -2,60 +2,18 @@
 
 Nova is a friendly, slightly witty Discord companion that chats naturally in DMs or when mentioned in servers. It runs on Node.js, uses `discord.js` v14, and supports OpenRouter (recommended) or OpenAI backends for model access, plus lightweight local memory for persistent personality.
 
-## Recent changes (2026-03-01)
-- Added token-usage + performance optimizations (prompt builder + context caching + smaller injected payloads).
-- Upgraded the local memory dashboard: long-term memory create/edit, pagination (15 per page), search preview helper, and a recall timeline view.
-- Added Discord-side extras: `🧠` memory-injected reaction badge + a `/blackjack` embed mini-game with buttons.
-- Full session log lives in `CHANGELOG.md` (and is mirrored below). test
+## Recent changes (2026-03-03)
+- Added a global memory mode that optionally pulls long-term entries from every user while still tagging each snippet by `user_id`.
+- Documented the `useGlobalMemories` flag so prompt construction can switch to the cross-user context when needed without losing per-user summaries.
+- Full session log lives in `CHANGELOG.md` (and mirrors the latest update below).
 
 <details>
 <summary>Full update log (session)</summary>
 
-- Token + performance optimizations
-  - Added `src/prompt.js` to centralize prompt construction (`buildPrompt`) and reduce repeated prompt-building logic.
-  - Added a short-lived in-memory context cache in `src/bot.js` to reuse prepared context across the continuation loop and normal replies.
-  - Reduced default memory/prompt sizes in `src/config.js`:
-    - `shortTermLimit`: 10 -> 6
-    - `summaryTriggerChars`: 3000 -> 2200
-    - `relevantMemoryCount`: 5 -> 3
-    - Added `longTermFetchLimit` (default 120)
-  - Limited long-term memory retrieval to a recent window before similarity scoring in `src/memory.js` (uses `longTermFetchLimit`).
-  - Summarized live web-search intel before injecting it into the prompt (keeps the payload shorter) in `src/bot.js`.
-  - Debounced memory DB persistence in `src/memory.js` to batch multiple writes (instead of exporting/writing on every mutation).
-
-- Dashboard (local memory UI)
-  - Revamped the dashboard UI layout + styling in `src/public/index.html`.
-  - Added long-term memory create/edit support:
-    - API: `POST /api/users/:id/long` in `src/dashboard.js`
-    - Store: `upsertLongTerm()` in `src/memory.js`
-  - Added long-term memory pagination:
-    - API: `GET /api/users/:id/long?page=&per=` returns `{ rows, total, page, per, totalPages }` via `getLongTermMemoriesPage()` in `src/memory.js`
-    - UI: paging controls; long-term list shows 15 per page (`LONG_TERM_PER_PAGE = 15`)
-  - Added "search preview" UX in the dashboard to quickly reuse a similar memory result as an edit/create starting point ("Use this memory").
-  - Added a simple recall timeline:
-    - API: `GET /api/users/:id/timeline?days=` in `src/dashboard.js`
-    - Store: `getMemoryTimeline()` in `src/memory.js`
-    - UI: lightweight bar chart in `src/public/index.html`
-
-- Fixes
-  - Fixed dashboard long-term pagination wiring (`getLongTermMemoriesPage` import/usage) in `src/dashboard.js`.
-  - Fixed dashboard long-term "Edit" button behavior by wiring row handlers in `src/public/index.html`.
-  - Prevented button interactions from crashing the bot on late/invalid updates by deferring updates and editing the message in `src/bot.js`.
-
-- Discord-side features
-  - Added a memory-aware reaction badge: bot reacts with `🧠` when long-term memories were injected into the prompt (`src/bot.js`).
-  - Added a lightweight blackjack mini-game:
-    - Start via text trigger `/blackjack` (not a registered slash command).
-    - Single-embed game UI with button components for actions (Hit / Stand; Split is present as a placeholder).
-    - Improved interaction handling to avoid "Unknown interaction" crashes by deferring updates and editing the message (`src/bot.js`).
-
-- Reliability / guardrails
-  - Relaxed the "empty response" guard in `src/openai.js`:
-    - Still throws when the provider returns no choices.
-    - If choices exist but content is blank, returns an empty string instead of forcing fallback (reduces noisy false-positive failures).
-
-- Configuration / examples
-  - Updated `.env.example` to include `OPENAI_API_KEY`.
+- Global memory toggle (2026-03-03)
+  - Added `useGlobalMemories` support to `buildPrompt` so cross-user long-term memory retrieval can be enabled without losing the local context.
+  - `retrieveRelevantMemories` now surfaces each `user_id` and the prompt prefixes them (e.g., `- [123456] ...`) when the toggle is active, letting Nova know who owns every snippet.
+  - Cosine relevance still ranks entries by similarity plus importance, so the top-K results pick the best matches even across users.
 
 </details>
 
@@ -63,6 +21,7 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - Conversational replies in DMs automatically; replies in servers when mentioned or in a pinned channel.
 - Chat model (defaults to `meta-llama/llama-3-8b-instruct` when using OpenRouter) for dialogue and a low-cost embedding model (`nvidia/llama-nemotron-embed-vl-1b-v2` by default). OpenAI keys/models may be used as a fallback.
 - Short-term, long-term, and summarized memory layers with cosine-similarity retrieval.
+- Optional global memory retrieval: set `useGlobalMemories=true` when calling `buildPrompt` so Nova can pull long-term memories across every `user_id`, and each snippet is labeled (e.g., `- [123] ...`) to keep the source clear while keeping summaries scoped to the active user.
 - **Rotating “daily mood” engine** that adjusts Nova’s personality each day (calm, goblin, philosopher, etc.). Mood influences emoji use, sarcasm, response length, and hype.  (Now randomized each run rather than fixed by calendar date.)
 - **LLM-powered live–intel web search**: Nova uses the LLM itself to decide whether a topic needs a live web search. If you mention something unfamiliar or that requires current info, it automatically Googles first and uses the results in its response—without triggering on casual chat.
 - **Optional local memory dashboard** (enabled with `ENABLE_DASHBOARD=true`): spin up a simple browser UI alongside the bot. Inspect stored memories by user, delete entries, run similarity queries, view importance scores, and peek at Nova’s current mood and quirky “status” of the day. The dashboard runs on `DASHBOARD_PORT` (3000 by default) and is entirely optional.

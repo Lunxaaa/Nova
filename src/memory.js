@@ -313,15 +313,22 @@ const migrateLegacyStore = async (db) => {
   return true;
 };
 
-const retrieveRelevantMemories = async (db, userId, query) => {
+const retrieveRelevantMemories = async (db, userId, query, options = {}) => {
   if (!query?.trim()) {
     return [];
   }
   const limit = config.longTermFetchLimit || 200;
+  const { includeAllUsers = false } = options;
+  const params = [];
+  const whereClause = includeAllUsers ? '' : ' WHERE user_id = ?';
+  if (!includeAllUsers) {
+    params.push(userId);
+  }
+  params.push(limit);
   const rows = all(
     db,
-    'SELECT id, content, embedding, importance, timestamp FROM long_term WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?',
-    [userId, limit],
+    `SELECT id, user_id, content, embedding, importance, timestamp FROM long_term${whereClause} ORDER BY timestamp DESC LIMIT ?`,
+    params,
   );
   if (!rows.length) {
     return [];
@@ -354,12 +361,13 @@ export async function appendShortTerm(userId, role, content) {
   await persistDb(db);
 }
 
-export async function prepareContext(userId, incomingMessage) {
+export async function prepareContext(userId, incomingMessage, options = {}) {
   const db = await loadDatabase();
   ensureUser(db, userId);
   const userRow = get(db, 'SELECT summary FROM users WHERE id = ?', [userId]) || { summary: '' };
   const shortTerm = getShortTermHistory(db, userId, config.shortTermLimit);
-  const memories = await retrieveRelevantMemories(db, userId, incomingMessage);
+  const { includeAllUsers = false } = options;
+  const memories = await retrieveRelevantMemories(db, userId, incomingMessage, { includeAllUsers });
   return {
     shortTerm,
     summary: userRow.summary || '',
@@ -492,9 +500,9 @@ export async function upsertLongTerm(userId, entry) {
   return { id: newId, timestamp: now, created: true };
 }
 
-export async function findSimilar(userId, query) {
+export async function findSimilar(userId, query, options = {}) {
   const db = await loadDatabase();
-  return retrieveRelevantMemories(db, userId, query);
+  return retrieveRelevantMemories(db, userId, query, options);
 }
 
 export async function getDailyThoughtFromDb(date) {

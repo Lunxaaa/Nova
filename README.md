@@ -30,7 +30,6 @@ Nova is a friendly, slightly witty Discord companion that chats naturally in DMs
 - **LLM-powered live–intel web search**: Nova uses the LLM itself to decide whether a topic needs a live web search. If you mention something unfamiliar or that requires current info, it automatically Googles first and uses the results in its response—without triggering on casual chat.
 - **Optional local memory dashboard** (enabled with `ENABLE_DASHBOARD=true`): spin up a simple browser UI alongside the bot. Inspect stored memories by user, delete entries, run similarity queries, view importance scores, and peek at Nova’s current mood and quirky “status” of the day. The dashboard runs on `DASHBOARD_PORT` (3000 by default) and is entirely optional.
 - Local dashboard upgrades: long-term memory create/edit, pagination (15 per page), and a simple recall timeline.
-- `🧠` reaction badge when long-term memories are injected for a reply.
 - A simple `/blackjack` mini-game (embed + buttons).
 
 - Automatic memory pruning, importance scoring, and transcript summarization when chats grow long.

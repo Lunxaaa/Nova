@@ -1,3 +1,7 @@
+Need your own discord bot, or help with it? Any other project related to or want to code something? I offer commissions!!!! Discord: lunxaaaaa
+email: lunarfoxies@icloud.com
+
+
 # Discord AI Companion
 
 Nova is a friendly, slightly witty Discord companion that chats naturally in DMs or when mentioned in servers. It runs on Node.js, uses `discord.js` v14, and supports OpenRouter (recommended) or OpenAI backends for model access, plus lightweight local memory for persistent personality.
